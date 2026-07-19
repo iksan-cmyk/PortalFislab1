@@ -239,6 +239,7 @@ async function showApp(){
   document.getElementById('bot-nav').style.display='';
   const ses = getSession();
   if (!ses) { showLanding(); return; }
+  renderApp();
 
   // pastikan kode aslab sudah jadi array
   if (ses.role === 'aslab' && !Array.isArray(ses.kode)) {
