@@ -225,12 +225,18 @@ function initLoginPanel() {
 
 /*root*/
 function showLanding(){ 
-  document.getElementById('landing').style.display='';document.getElementById('app').classList.remove('visible');document.documentElement.classList.add('lusion'); 
+  document.getElementById('landing').style.display='';
+  document.getElementById('app').classList.remove('visible');
+  document.documentElement.classList.add('lusion');
+  document.getElementById('mob-actions').style.display='none';
+  document.getElementById('bot-nav').style.display='none';
 }
 async function showApp(){ 
   document.getElementById('landing').style.display='none';
   document.getElementById('app').classList.add('visible');
   document.documentElement.classList.remove('lusion');
+  document.getElementById('mob-actions').style.display='';
+  document.getElementById('bot-nav').style.display='';
   const ses = getSession();
   if (!ses) { showLanding(); return; }
 
@@ -280,16 +286,47 @@ const IC={
 /*render app*/
 function renderApp() {
   const ses=getSession(); if(!ses){showLanding();return;}
-  document.getElementById('topbar-name').textContent=ses.name;
-  document.getElementById('topbar-role').textContent=roleLabel(ses);
-  const avEl=document.getElementById('topbar-av');
-  avEl.innerHTML=ses.photo?`<img src="${ses.photo}" alt="${ses.name}">`:initials(ses.name);
-  avEl.onclick=()=>openEditModal(ses);
-  document.getElementById('btn-logout').onclick=()=>{clearSession();CACHE={};showLanding();};
-  const hash=window.location.hash.replace('#','')||'/';
+  // sidebar user info
+  const sbName = document.getElementById('sb-name');
+  const sbRole = document.getElementById('sb-role');
+  const sbAv   = document.getElementById('sb-av');
+  if (sbName) sbName.textContent = ses.name;
+  if (sbRole) sbRole.textContent = roleLabel(ses);
+  if (sbAv)   sbAv.innerHTML = ses.photo ? `<img src="${ses.photo}" alt="${ses.name}">` : initials(ses.name);
+
+  // mobile actions
+  const mobAv = document.getElementById('mob-av');
+  if (mobAv) mobAv.innerHTML = ses.photo ? `<img src="${ses.photo}" alt="${ses.name}">` : initials(ses.name);
+  const mobLogout = document.getElementById('btn-logout-mob');
+  if (mobLogout) mobLogout.onclick = () => { clearSession(); CACHE={}; showLanding(); };
+
+  window._currentSes = ses;
+  document.getElementById('btn-logout-sb').onclick = () => { clearSession(); CACHE={}; showLanding(); };  const hash=window.location.hash.replace('#','')||'/';
   if(ses.role==='praktikan') renderPraktikan(hash,ses);
   else if(ses.role==='aslab') renderAslab(hash,ses);
   else renderAdmin(hash,ses);
+}
+function toggleSidebar() {
+  const sb = document.getElementById('sidebar');
+  const btn = document.getElementById('sidebar-toggle');
+  sb.classList.toggle('expanded');
+  btn.textContent = sb.classList.contains('expanded') ? '‹' : '›';
+  localStorage.setItem('sb_expanded', sb.classList.contains('expanded'));
+}
+
+function openEditModalFromSb() {
+  const ses = getSession();
+  if (ses) openEditModal(ses);
+}
+
+// restore sidebar state
+function initSidebar() {
+  const expanded = localStorage.getItem('sb_expanded') === 'true';
+  if (expanded) {
+    document.getElementById('sidebar')?.classList.add('expanded');
+    const btn = document.getElementById('sidebar-toggle');
+    if (btn) btn.textContent = '‹';
+  }
 }
 function roleLabel(u){ 
   if(
@@ -300,9 +337,24 @@ function roleLabel(u){
   return 'Praktikan · Kelompok '+u.kelompok; 
   return'Praktikan · Kelompok '+u.kelompok; 
 }
-function buildNav(items,active){
-  document.getElementById('desk-nav').innerHTML=items.map(n=>`<a href="#${n.path}" class="${active===n.path?'active':''}">${n.label}</a>`).join('');
-  document.getElementById('bot-nav').innerHTML=items.map(n=>`<a href="#${n.path}" class="${active===n.path?'active':''}">${IC[n.icon]}<span>${n.label}</span></a>`).join('');
+function buildNav(items, active) {
+  // sidebar
+  const sbNav = document.getElementById('sb-nav');
+  if (sbNav) {
+    sbNav.innerHTML = items.map(n => `
+      <a href="#${n.path}" class="sb-link${active===n.path?' active':''}" >
+        ${IC[n.icon]}
+        <span class="sb-label">${n.label}</span>
+      </a>`).join('');
+  }
+  // bottom nav (mobile)
+  const botNav = document.getElementById('bot-nav');
+  if (botNav) {
+    botNav.innerHTML = items.map(n => `
+      <a href="#${n.path}" class="${active===n.path?'active':''}">
+        ${IC[n.icon]}<span>${n.label}</span>
+      </a>`).join('');
+  }
 }
 function setContent(html){
   document.getElementById('content').innerHTML=html;
@@ -974,6 +1026,8 @@ function applyTheme(mode) {
   icon.innerHTML = mode === 'dark'
     ? '<circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/>'
     : '<path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>';
+  const iconMob = document.getElementById('theme-icon-mob');
+  if (iconMob) iconMob.innerHTML = icon.innerHTML;
 }
 function toggleTheme() {
   const current = document.documentElement.classList.contains('dark') ? 'dark' : 'light';
@@ -982,6 +1036,7 @@ function toggleTheme() {
 
 document.addEventListener('DOMContentLoaded',()=>{
   applyTheme(localStorage.getItem('lp_theme') || 'light');
+  initSidebar();
   initCursor();initWebGL();initLoginPanel();loadLandingModules();
   const ses=getSession();if(ses){showApp();}else{showLanding();}
 });

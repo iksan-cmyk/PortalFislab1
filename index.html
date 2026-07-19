@@ -74,8 +74,58 @@
 </aside>
 
 <div id="app">
-  <div id="topbar">
-    <div id="topbar-inner">
+  <!--sidebar-->
+  <div id="sidebar">
+    <button id="sidebar-toggle" onclick="toggleSidebar()">›</button>
+    <nav class="sb-nav" id="sb-nav">
+
+    </nav>
+    <div class="sb-divider"></div>
+    <div class="sb-bottom">
+      <button class="sb-link" id="btn-theme-sb" onclick="toggleTheme()" style="border:none;width:100%;text-align:left;">
+        <svg id="theme-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+            <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>
+          </svg>
+      </button>
+      <button class="sb-link" id="btn-logout-sb" style="border:none;width:100%;text-align:left;">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+          <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/>
+          <polyline points="16 17 21 12 16 7"/>
+          <line x1="21" y1="12" x2="9" y2="12"/>
+        </svg>
+      </button>
+      <div class="sb-avatar" id="sb-avatar" onclick="openEditModalFromSb()">
+        <div class="av" id="sb-av"></div>
+        <div class="sb-avatar-meta">
+          <b id="sb-name"></b>
+          <span id="sb-role"></span>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div id="main-area">
+    <div id="content"></div>
+  </div>
+  <!-- BOTTOM NAV (mobile) -->
+  <nav id="bot-nav"></nav>
+
+  <!-- MOBILE ACTION BAR -->
+  <div id="mob-actions">
+    <div id="mob-av" onclick="openEditModalFromSb()" title="Edit profil"></div>
+    <button onclick="toggleTheme()" title="Ganti tema">
+      <svg id="theme-icon-mob" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+        <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>
+      </svg>
+    </button>
+    <button id="btn-logout-mob" title="Keluar">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+        <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/>
+        <polyline points="16 17 21 12 16 7"/>
+        <line x1="21" y1="12" x2="9" y2="12"/>
+      </svg>
+    </button>
+  </div>
+    <!--<div id="topbar-inner">
       <div class="brand"></span>Portal Fislab I</div>
       <nav id="desk-nav"></nav>
       <div class="user-chip">
@@ -93,7 +143,8 @@
     </div>
   </div>
   <div id="content"></div>
-  <nav id="bot-nav"></nav>
+  <nav id="bot-nav"></nav>-->
+
 </div>
 <div id="modal-root"></div>
 
