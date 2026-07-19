@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>LabPortal — Fisika Laboratorium</title>
+<link rel="stylesheet" href="style.css">
+<link href="https://db.onlinewebfonts.com/c/47647a122a3767df07970e1eda4e7d82?family=Friz+Quadrata" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css?family=Work+Sans" rel="stylesheet">
+
+</head>
+<body>
+<div id="cur-dot"></div>
+<div id="cur-ring"></div>
+
+<div id="landing">
+  <section id="hero">
+    <div class="blobs"><div class="blob blob-1"></div><div class="blob blob-2"></div><div class="blob blob-3"></div></div>
+    <canvas id="webgl"></canvas>
+    <div class="hero-grid"></div><div class="hero-vignette"></div><div class="hero-grain"></div>
+    <nav id="hero-nav">
+      
+    </nav>
+    <div id="hero-content">
+      <div style="margin-top:auto;">
+        <h1 id="hero-title" style="font-size:clamp(36px,7vw,80px);font-weight:400;
+        line-height:1.05;margin:0 0 20px;max-width:600px;">
+          <span class="line"><span style="animation-delay:.04s">Platform untuk</span></span>
+          <span class="line"><span class="accent" style="animation-delay:.16s;font-family: 'Friz Quadrata', serif;">seluruh alur</span></span>
+          <span class="line"><span style="animation-delay:.28s">praktikum.</span></span>
+        </h1>
+        <button class="btn btn-primary" id="btn-open-panel-3" 
+        style="height:52px;padding:0 32px;font-size:15px;border-radius:100px;">
+        Login →
+        </button>
+      </div>
+    </div>
+    <div class="scroll-cue"><span class="scroll-line"></span>Scroll</div>
+  </section>
+
+  <section id="section-modul">
+    <div class="sec-inner">
+      <div id="mod-grid"><div class="page-loading"><div class="spinner"></div>Memuat modul…</div></div>
+    </div>
+  </section>
+
+  <div style="background:#000;border-top:1px solid rgba(255,255,255,.07);">
+    <div id="landing-footer">
+      <span>© 2026 Fisika Laboratorium ITS — Surabaya</span>
+    </div>
+  </div>
+</div>
+
+<div id="viewer-root" style="display:none;"></div>
+
+<div id="panel-backdrop"></div>
+<aside id="login-panel" role="dialog" aria-modal="true">
+  <div class="panel-head">
+    <button class="panel-close" id="btn-close-panel">✕</button>
+  </div>
+  <h2>Masuk ke akun kamu</h2>
+  <div id="login-err"></div>
+  <form id="login-form" novalidate>
+    <div class="field">
+      <label for="f-user">Username</label>
+      <input type="text" id="f-user" placeholder="username" autocomplete="username">
+    </div>
+    <div class="field">
+      <label for="f-pass">Password</label>
+      <input type="password" id="f-pass" placeholder="••••••••" autocomplete="current-password">
+    </div>
+    <button type="submit" class="btn btn-primary btn-block" id="btn-login" style="height:52px;font-size:15px;">Masuk</button>
+  </form>
+</aside>
+
+<div id="app">
+  <div id="topbar">
+    <div id="topbar-inner">
+      <div class="brand"></span>Portal Fislab I</div>
+      <nav id="desk-nav"></nav>
+      <div class="user-chip">
+        <div class="user-meta"><b id="topbar-name"></b><span id="topbar-role"></span></div>
+        <div class="av" id="topbar-av" title="Edit profil"></div>
+        <button class="btn-icon" id="btn-theme" title="Ganti tema" onclick="toggleTheme()">
+          <svg id="theme-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+            <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>
+          </svg>
+        </button>
+        <button class="btn-icon" id="btn-logout" title="Keluar">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+        </button>
+      </div>
+    </div>
+  </div>
+  <div id="content"></div>
+  <nav id="bot-nav"></nav>
+</div>
+<div id="modal-root"></div>
+
+<script>
+const API_URL = 'https://script.google.com/macros/s/AKfycbxe5oypxe-7A5f8pb59InPtArtm2PpQTx_V8tGRDs0SkizWukxjqTcPiWvvDnvt2aVvHw/exec';
+const APP = {
+  modules: null,
+  users: null,
+  grades: null,
+  schedules: null,
+  rotasi: null
+};
+</script>
+<script src="script.js"></script>
+</body>
+</html>
