@@ -30,7 +30,13 @@
           <span class="line"><span style="animation-delay:.28s">praktikum.</span></span>
         </h1>
         <button class="btn btn-primary" id="btn-open-panel-3" 
-        style="height:52px;padding:0 32px;font-size:15px;border-radius:100px;">
+        style="height:52px;
+        padding:0 32px;
+        font-size:15px;
+        border-radius:100px;
+        background: rgba(255,255,255,.06) !important;
+        backdrop-filter: blur(24px) saturate(200%) !important;
+        -webkit-backdrop-filter: blur(24px) saturate(200%) !important;">
         Login →
         </button>
       </div>
@@ -82,17 +88,19 @@
     </nav>
     <div class="sb-divider"></div>
     <div class="sb-bottom">
-      <button class="sb-link" id="btn-theme-sb" onclick="toggleTheme()" style="border:none;width:100%;text-align:left;">
+      <button class="sb-link" id="btn-theme-sb" onclick="toggleTheme()">
         <svg id="theme-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
-            <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>
-          </svg>
+          <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>
+        </svg>
+        <span class="sb-label">Tema</span>
       </button>
-      <button class="sb-link" id="btn-logout-sb" style="border:none;width:100%;text-align:left;">
+      <button class="sb-link" id="btn-logout-sb" data-label="Keluar">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
           <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/>
           <polyline points="16 17 21 12 16 7"/>
           <line x1="21" y1="12" x2="9" y2="12"/>
         </svg>
+        <span class="sb-label">Logout</span>
       </button>
       <div class="sb-avatar" id="sb-avatar" onclick="openEditModalFromSb()">
         <div class="av" id="sb-av"></div>
