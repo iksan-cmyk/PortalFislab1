@@ -53,8 +53,8 @@ const getSession  = () => {
      return null; 
     } 
   };
-const setSession = u  => localStorage.setItem(SES_KEY, JSON.stringify(u));
-const clearSession = () => localStorage.removeItem(SES_KEY);
+const setSession  = u  => localStorage.setItem(SES_KEY, JSON.stringify(u));
+const clearSession     = () => localStorage.removeItem(SES_KEY);
 let CACHE = {};
 const CACHE_TTL = 5 * 60 * 1000;
 
@@ -72,35 +72,26 @@ function cacheGet(key) {
 const initials = n => n.split(' ').map(w=>w[0]).slice(0,2).join('').toUpperCase();
 function av(user, extra='') {
   const cls='av'+(extra?' '+extra:'');
-  if(user.photo) 
-    return `
-    <div class="${cls}">
-      <img src="${user.photo}" alt="${user.name}">
-    </div>`;
-  return `
-  <div class="${cls}">${initials(user.name)}</div>`;
+  if(user.photo) return `<div class="${cls}"><img src="${user.photo}" alt="${user.name}"></div>`;
+  return `<div class="${cls}">${initials(user.name)}</div>`;
 }
 function toast(msg) {
   const el=document.createElement('div');el.className='toast';el.textContent=msg;
   document.body.appendChild(el);setTimeout(()=>el.remove(),2400);
 }
 function fmtTgl(tgl) {
-  if (!tgl) 
-    return '—';
+  if (!tgl) return '—';
   const d = new Date(tgl);
-  if (isNaN(d)) 
-    return tgl;
+  if (isNaN(d)) return tgl;
   return d.toLocaleDateString('id-ID', { weekday:'long', day:'numeric', month:'long', year:'numeric' });
 }
 function loading(msg='Memuat…') {
-  return `
-  <div class="page-loading"><div class="spinner spinner-dk"></div>${msg}</div>`;
+  return `<div class="page-loading"><div class="spinner spinner-dk"></div>${msg}</div>`;
 }
 let modsCache = null;
 async function getMods() {
   const cached = cacheGet('modules');
-  if (cached) 
-    return cached;
+  if (cached) return cached;
   const mods = (await api('getModules')).modules;
   cacheSet('modules', mods);
   return mods;
@@ -135,8 +126,7 @@ function initWebGL() {
 
 function initCursor() {
   const dot=document.getElementById('cur-dot'),ring=document.getElementById('cur-ring');
-  if(!dot||!ring)
-    return;
+  if(!dot||!ring)return;
   document.documentElement.classList.add('lusion');
   let rx=innerWidth/2,ry=innerHeight/2;
   document.addEventListener('mousemove',e=>{
@@ -152,8 +142,7 @@ function initCursor() {
 
 function openViewer(mod) {
   if (!mod.fileUrl || mod.fileUrl.includes('GANTI')) {
-    alert('URL file belum diisi untuk modul ini. Isi kolom fileUrl di sheet modules.'); 
-  return;
+    alert('URL file belum diisi untuk modul ini. Isi kolom fileUrl di sheet modules.'); return;
   }
   let src = mod.fileUrl;
   if (mod.fileType === 'pdf') {
@@ -208,13 +197,10 @@ async function loadLandingModules() {
 }
 
 const openPanel  = ()=>{ 
-  document.getElementById('panel-backdrop').classList.add('open');
-  document.getElementById('login-panel').classList.add('open');
-  setTimeout(()=>document.getElementById('f-user')?.focus(),350); 
+  document.getElementById('panel-backdrop').classList.add('open');document.getElementById('login-panel').classList.add('open');setTimeout(()=>document.getElementById('f-user')?.focus(),350); 
 };
 const closePanel = ()=>{ 
-  document.getElementById('panel-backdrop').classList.remove('open');
-  document.getElementById('login-panel').classList.remove('open'); 
+  document.getElementById('panel-backdrop').classList.remove('open');document.getElementById('login-panel').classList.remove('open'); 
 };
 
 function initLoginPanel() {
@@ -259,6 +245,7 @@ async function showApp(){
   if (!ses) { showLanding(); return; }
   renderApp();
 
+  // pastikan kode aslab sudah jadi array
   if (ses.role === 'aslab' && !Array.isArray(ses.kode)) {
     ses.kode = ses.kode ? ses.kode.split(',').map(k=>k.trim()).filter(Boolean) : [];
     setSession(ses);
@@ -304,6 +291,7 @@ const IC={
 /*render app*/
 function renderApp() {
   const ses=getSession(); if(!ses){showLanding();return;}
+  // sidebar user info
   const sbName = document.getElementById('sb-name');
   const sbRole = document.getElementById('sb-role');
   const sbAv   = document.getElementById('sb-av');
@@ -311,14 +299,14 @@ function renderApp() {
   if (sbRole) sbRole.textContent = roleLabel(ses);
   if (sbAv)   sbAv.innerHTML = ses.photo ? `<img src="${ses.photo}" alt="${ses.name}">` : initials(ses.name);
 
+  // mobile actions
   const mobAv = document.getElementById('mob-av');
   if (mobAv) mobAv.innerHTML = ses.photo ? `<img src="${ses.photo}" alt="${ses.name}">` : initials(ses.name);
   const mobLogout = document.getElementById('btn-logout-mob');
   if (mobLogout) mobLogout.onclick = () => { clearSession(); CACHE={}; showLanding(); };
 
   window._currentSes = ses;
-  document.getElementById('btn-logout-sb').onclick = () => { clearSession(); CACHE={}; showLanding(); };  
-  const hash=window.location.hash.replace('#','')||'/';
+  document.getElementById('btn-logout-sb').onclick = () => { clearSession(); CACHE={}; showLanding(); };  const hash=window.location.hash.replace('#','')||'/';
   if(ses.role==='praktikan') renderPraktikan(hash,ses);
   else if(ses.role==='aslab') renderAslab(hash,ses);
   else renderAdmin(hash,ses);
@@ -336,6 +324,7 @@ function openEditModalFromSb() {
   if (ses) openEditModal(ses);
 }
 
+// restore sidebar state
 function initSidebar() {
   const expanded = localStorage.getItem('sb_expanded') === 'true';
   if (expanded) {
@@ -354,6 +343,7 @@ function roleLabel(u){
   return'Praktikan · Kelompok '+u.kelompok; 
 }
 function buildNav(items, active) {
+  // sidebar
   const sbNav = document.getElementById('sb-nav');
   if (sbNav) {
     sbNav.innerHTML = items.map(n => `
@@ -362,6 +352,7 @@ function buildNav(items, active) {
         <span class="sb-label">${n.label}</span>
       </a>`).join('');
   }
+  // bottom nav (mobile)
   const botNav = document.getElementById('bot-nav');
   if (botNav) {
     botNav.innerHTML = items.map(n => `
@@ -411,16 +402,7 @@ const NAV_P=[{path:'/p/dashboard',label:'Dashboard',icon:'profil'},{path:'/p/mod
 
 function renderPraktikan(hash,ses){
   const path=hash||'/p/dashboard'; const active=path; buildNav(NAV_P,active);
-  switch(path){
-    case'/p/modul':loadModulP(ses);
-    break;
-    case'/p/jadwal':loadJadwalP(ses);
-    break;
-    case'/p/nilai':loadNilaiP(ses);
-    break;
-    case'/p/kontak':loadKontakP(ses);
-    break;
-    default:loadProfilP(ses);}
+  switch(path){case'/p/modul':loadModulP(ses);break;case'/p/jadwal':loadJadwalP(ses);break;case'/p/nilai':loadNilaiP(ses);break;case'/p/kontak':loadKontakP(ses);break;default:loadProfilP(ses);}
 }
 async function loadProfilP(ses){
   setContent(loading());
@@ -488,9 +470,7 @@ async function loadJadwalP(ses){
     </div>
     <div class="g g3">
       ${rotasi.map(r=>{
-        const s = schedules.find(x => x.judul === r.id && +x.kelompokId === +ses.kelompok);        
-        return`
-        <div class="card" style="display:flex;flex-direction:column;gap:12px;padding:20px;">
+          const s = schedules.find(x => x.judul === r.id && +x.kelompokId === +ses.kelompok);        return`<div class="card" style="display:flex;flex-direction:column;gap:12px;padding:20px;">
           <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:8px;">
             <div style="background:var(--blue);color:#fff;border-radius:10px;padding:6px 10px;
               font-size:12px;font-weight:700;letter-spacing:.03em;flex-shrink:0;">
@@ -523,11 +503,7 @@ async function loadNilaiP(ses){
   setContent(loading());
   try{
     const[mods,{grades}]=await Promise.all([getMods(),api('getGrades',{username:ses.username})]);
-    setContent(`
-      <div class="ph">
-        <span class="ey">Evaluasi</span>
-        <h1>Nilai Praktikum</h1>
-      </div>
+    setContent(`<div class="ph"><span class="ey">Evaluasi</span><h1>Nilai Praktikum</h1></div>
       <div class="nilai-accordion">
         ${mods.map(m=>{
           const g=grades.find(x=>x.judul===m.id||x.judul===m.judul)||{};
@@ -539,8 +515,7 @@ async function loadNilaiP(ses){
               <div class="ncard-meta">
                 ${hasCat?`<span class="tag amber" style="font-size:10px;">Ada catatan</span>`:''}
                 ${total?`<span class="ncard-total">${parseFloat(total).toFixed(2)}</span>`:'<span class="tag" style="font-size:11px;">Belum dinilai</span>'}
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="color:var(--muted);transition:transform .2s;" class="ncard-chevron">
-                <polyline points="6 9 12 15 18 9"/></svg>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="color:var(--muted);transition:transform .2s;" class="ncard-chevron"><polyline points="6 9 12 15 18 9"/></svg>
               </div>
             </div>
             <div class="ncard-body">
@@ -548,11 +523,8 @@ async function loadNilaiP(ses){
                 ${KOMP.map(k=>{
                   const score=g[k.key]!==undefined&&g[k.key]!==''?g[k.key]:null;
                   const cat=g[k.cat]||'';
-                  return`
-                  <div class="nrow">
-                    <div class="nrow-label">${k.label}
-                      <span class="nrow-bobot">(${k.bobot}%)</span>
-                    </div>
+                  return`<div class="nrow">
+                    <div class="nrow-label">${k.label}<span class="nrow-bobot">(${k.bobot}%)</span></div>
                     <div class="nrow-score${score===null?' na':''}">${score!==null?score:'—'}</div>
                     ${cat?`<div class="nrow-cat">✎ ${cat}</div>`:`<div class="nrow-cat empty">Belum ada catatan</div>`}
                   </div>`;}).join('')}
@@ -574,18 +546,15 @@ async function loadKontakP(ses){
     const[{users},mods]=await Promise.all([api('getUsers', {}, true),getMods()]);
     const list=users.filter(u=>u.role==='aslab'&&Array.isArray(u.kelompok)&&u.kelompok.includes(+ses.kelompok));
     setContent(`
-      <div class="ph">
-        <h1>Kontak Asisten Lab</h1>
-      </div>
+      <div class="ph"><h1>Kontak Asisten Lab</h1></div>
       <div class="g g2">
         ${list.map(a=>{
           const m=mods.find(x=>x.id===a.judul);
           const judulLabel=m?m.judul:a.judul;
           const kodeLabel=m?m.kode:'-';
           const waNum = a.wa ? a.wa.replace(/\D/g,'') : '';
-          return`
-          <div class="card" style="padding:0;overflow:hidden;border-radius:20px;cursor:pointer;"
-          onclick="openKontakPanel('${a.name}','${judulLabel}','${a.photo||''}','${initials(a.name)}','${waNum}')"            
+          return`<div class="card" style="padding:0;overflow:hidden;border-radius:20px;cursor:pointer;"
+          onclick="openKontakPanel('${a.name}','${judulLabel}','${a.photo||''}','${initials(a.name)}','${waNum}')"            <!-- header gradient -->
             <div style="height:110px;background:linear-gradient(135deg,#1B39B0,#8C4FEB,#FEA3DB);position:relative;">
               <div style="position:absolute;bottom:-28px;left:20px;
                 width:56px;height:56px;border-radius:50%;border:3px solid var(--surface);overflow:hidden;
@@ -611,14 +580,12 @@ function openKontakPanel(name, judul, photo, inits, waNum) {
 
   document.getElementById('modal-root').innerHTML = `
   <div class="modal-back" id="kback">
-    <div class="modal" style="padding:0;overflow:hidden;max-width:400px;
-    border-radius:24px;max-height:90vh;overflow-y:auto;width:100%;">
-      
+    <div class="modal" style="padding:0;overflow:hidden;max-width:400px;border-radius:24px;">
+      <!-- header -->
       <div style="height:130px;background:linear-gradient(135deg,#1B39B0,#8C4FEB,#FEA3DB);position:relative;flex-shrink:0;">
         <button onclick="closeModal()" style="position:absolute;top:14px;right:14px;
           width:32px;height:32px;border-radius:50%;background:rgba(0,0,0,.25);
-          display:flex;align-items:center;justify-content:center;color:#fff;font-size:16px;cursor:pointer;">✕
-        </button>
+          display:flex;align-items:center;justify-content:center;color:#fff;font-size:16px;cursor:pointer;">✕</button>
         <div style="position:absolute;bottom:-30px;left:50%;transform:translateX(-50%);
           width:62px;height:62px;border-radius:50%;border:3px solid var(--surface);overflow:hidden;
           background:var(--blue);display:flex;align-items:center;justify-content:center;
@@ -626,11 +593,11 @@ function openKontakPanel(name, judul, photo, inits, waNum) {
           ${photo?`<img src="${photo}" style="width:100%;height:100%;object-fit:cover;">`:`${inits}`}
         </div>
       </div>
-      
+      <!-- body -->
       <div style="padding:44px 24px 24px;text-align:center;">
         <div style="font-size:17px;font-weight:600;color:var(--text);margin-bottom:4px;">${name}</div>
         <div style="font-size:12px;color:var(--muted);margin-bottom:24px;">Asisten Laboratorium</div>
-        
+        <!-- template tetap, hanya bagian isi yang diedit -->
         <div style="background:var(--off);border:1px solid var(--border);border-radius:14px;
           padding:14px;font-size:13px;color:var(--muted);text-align:left;margin-bottom:12px;line-height:1.7;">
           Halo Kak <b style="color:var(--text);">${name}</b>, perkenalkan saya:<br>
@@ -685,12 +652,7 @@ Kamsia`;
 /*aslab*/
 const NAV_A=[{path:'/a/jadwal',label:'Jadwal',icon:'jadwal'},{path:'/a/nilai',label:'Nilai',icon:'nilai'},{path:'/a/profil',label:'Profil',icon:'profil'}];
 function renderAslab(hash,ses){const path=hash||'/a/jadwal';buildNav(NAV_A,path);
-  switch(path){
-    case'/a/nilai':loadNilaiA(ses);
-    break;
-    case'/a/profil':loadProfilA(ses);
-    break;
-    default:loadJadwalA(ses);}
+  switch(path){case'/a/nilai':loadNilaiA(ses);break;case'/a/profil':loadProfilA(ses);break;default:loadJadwalA(ses);}
 }
 function loadProfilA(ses){
   console.log("SESSION", JSON.stringify(ses, null, 2));
@@ -713,8 +675,10 @@ async function loadJadwalA(ses){
     const mods    = APP.modules || await getMods();
     const myMods  = mods.filter(m => kodeList.includes(m.kode));
 
+    // ambil rotasi yang relevan (sudah ada di APP dari preload)
     let rotasi = APP.rotasi || (await api('getRotasi',{kode:kodeList.join(',')})).rotasi;
 
+    // ambil semua schedules untuk judul-judul yang dipegang
     const judulList = myMods.map(m=>m.judul);
     const allSchedules = await Promise.all(
       judulList.map(j => api('getSchedules',{judul:j}).then(r=>r.schedules))
@@ -722,13 +686,9 @@ async function loadJadwalA(ses){
     const schedules = allSchedules.flat();
 
     setContent(`
-    <div class="ph">
-      <span class="ey">Pengaturan</span>
-      <h1>Jadwal Praktikum</h1>
-    </div>
+    <div class="ph"><span class="ey">Pengaturan</span><h1>Jadwal Praktikum</h1></div>
     ${myMods.map(mod=>{
-      const myRotasi = rotasi.filter(r => (r.kode === mod.kode || r.judul === mod.judul) && r.aslab === ses.name);      
-      if(!myRotasi.length) return '';
+      const myRotasi = rotasi.filter(r => (r.kode === mod.kode || r.judul === mod.judul) && r.aslab === ses.name);      if(!myRotasi.length) return '';
       return`
       <div style="margin-bottom:28px;">
         <div style="display:flex;align-items:center;gap:10px;margin-bottom:14px;">
@@ -739,8 +699,7 @@ async function loadJadwalA(ses){
         <div class="g g2">
           ${myRotasi.map(r=>{
             const s = schedules.find(x => x.judul===mod.judul && +x.kelompokId===+r.kelompok);
-            return`
-            <div class="card">
+            return`<div class="card">
               <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;">
                 <h3>Kelompok ${r.kelompok}</h3>
                 <span class="tag" style="font-size:11px;">Minggu ke-${r.minggu}</span>
@@ -798,67 +757,44 @@ async function loadNilaiA(ses){
     window._aUsers=users; window._aSes=ses; window._rotasi=rotasi; window._myMods=myMods;
 
     setContent(`
-    <div class="ph">
-      <span class="ey">Penilaian</span>
-      <h1>Input Nilai</h1>
-    </div>
+    <div class="ph"><span class="ey">Penilaian</span><h1>Input Nilai</h1></div>
     <div class="fr" style="max-width:900px;margin-bottom:22px;">
-      <div class="ff">
-        <label>Modul</label>
+      <div class="ff"><label>Modul</label>
         <select id="a-mod-sel" onchange="aModChange(this)">
           <option value="">Pilih modul</option>
           ${myMods.map(m=>`<option value="${m.judul}">${m.kode} — ${m.judul}</option>`).join('')}
-        </select>
-      </div>
-      <div class="ff">
-        <label>Kelompok</label>
+        </select></div>
+      <div class="ff"><label>Kelompok</label>
         <select id="a-grp-sel" disabled onchange="aGrpChange(this)">
-          <option value="">Pilih modul dahulu</option>
-        </select>
-      </div>
+          <option value="">Pilih modul dahulu</option></select></div>
       <div class="ff"><label>Praktikan</label>
         <select id="a-stu-sel" disabled onchange="aStuChange(this)">
-          <option>Pilih kelompok dahulu</option>
-        </select>
-      </div>
+          <option>Pilih kelompok dahulu</option></select></div>
     </div>
     <div id="a-grade-wrap"></div>
     <div id="a-riwayat-wrap"></div>`);
 
+    // load riwayat semua modul sekaligus
     const judulList = myMods.map(m => m.judul);
     const allGrades = await Promise.all(judulList.map(j => api('getGrades',{judul:j}).then(r=>r.grades)));
     const semua = allGrades.flat().filter(g => g.nilaiAkhir !== '');
     const wrap = document.getElementById('a-riwayat-wrap');
     if (semua.length > 0) {
       wrap.innerHTML = `
-      <div class="ph" style="margin-top:32px;">
-        <span class="ey">Riwayat</span>
-        <h1>Sudah Dinilai</h1>
-      </div>
-      <div class="tw">
-        <table class="riwayat-table">
-          <thead>
-            <tr>
-              <th>Nama</th>
-              <th>Modul</th>
-              <th>Kelompok</th>
-              <th>Total Akhir</th>
-              <th>Diinput</th>
-            </tr>
-          </thead>
-          <tbody>${semua.map(g=>{
-            const u=(users||[]).find(x=>x.username===g.username);
-            const mod=myMods.find(m=>m.judul===g.judul);
-            return`<tr>
-              <td>${u?u.name:g.username}</td>
-              <td>${mod?`<span class="tag blue" style="font-size:10px;">${mod.kode}</span>`:g.judul}</td>
-              <td>${u?u.kelompok:'—'}</td>
-              <td><span class="score-chip ${scoreClass(g.nilaiAkhir)}">${parseFloat(g.nilaiAkhir).toFixed(2)}</span></td>
-              <td style="font-size:12px;color:var(--muted);">${g.updatedAt?new Date(g.updatedAt).toLocaleString('id-ID',{day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit'}):'-'}</td>
-            </tr>`;}).join('')}
-          </tbody>
-        </table>
-      </div>`;
+      <div class="ph" style="margin-top:32px;"><span class="ey">Riwayat</span><h1>Sudah Dinilai</h1></div>
+      <div class="tw"><table class="riwayat-table">
+        <thead><tr><th>Nama</th><th>Modul</th><th>Kelompok</th><th>Total Akhir</th><th>Diinput</th></tr></thead>
+        <tbody>${semua.map(g=>{
+          const u=(users||[]).find(x=>x.username===g.username);
+          const mod=myMods.find(m=>m.judul===g.judul);
+          return`<tr>
+            <td>${u?u.name:g.username}</td>
+            <td>${mod?`<span class="tag blue" style="font-size:10px;">${mod.kode}</span>`:g.judul}</td>
+            <td>${u?u.kelompok:'—'}</td>
+            <td><span class="score-chip ${scoreClass(g.nilaiAkhir)}">${parseFloat(g.nilaiAkhir).toFixed(2)}</span></td>
+            <td style="font-size:12px;color:var(--muted);">${g.updatedAt?new Date(g.updatedAt).toLocaleString('id-ID',{day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit'}):'-'}</td>
+          </tr>`;}).join('')}
+        </tbody></table></div>`;
     }
   }catch(e){setContent(`<p style="color:red">${e.message}</p>`);}
 }
@@ -873,7 +809,7 @@ function aModChange(sel){
     stu.disabled=true;stu.innerHTML='<option>Pilih kelompok dahulu</option>';
     return;
   }
-  //filter kelompok dari rotasi berdasarkan judul yang dipilih
+  // filter kelompok dari rotasi berdasarkan judul yang dipilih
   const rotasi = window._rotasi||[];
   const kelompoks = [...new Set(
     rotasi.filter(r=>r.judul===sel.value).map(r=>r.kelompok)
@@ -885,6 +821,7 @@ function aModChange(sel){
   stu.disabled=true;
   stu.innerHTML='<option>Pilih kelompok dahulu</option>';
 
+  // tampilkan riwayat
   loadRiwayatNilai(sel.value);
 }
 
@@ -895,31 +832,18 @@ async function loadRiwayatNilai(judul){
     const done=grades.filter(g=>g.nilaiAkhir!=='');
     if(!done.length){wrap.innerHTML='';return;}
     wrap.innerHTML=`
-    <div class="ph" style="margin-top:32px;">
-      <span class="ey">Riwayat</span>
-      <h1>Sudah Dinilai</h1>
-    </div>
-    <div class="tw">
-      <table class="riwayat-table">
-        <thead>
-          <tr>
-            <th>Nama</th>
-            <th>Kelompok</th>
-            <th>Total Akhir</th>
-            <th>Diinput</th>
-          </tr>
-        </thead>
-        <tbody>${done.map(g=>{
-          const u=(window._aUsers||[]).find(x=>x.username===g.username);
-          return`<tr>
-            <td>${u?u.name:g.username}</td>
-            <td>${u?u.kelompok:'—'}</td>
-            <td><span class="score-chip ${scoreClass(g.nilaiAkhir)}">${parseFloat(g.nilaiAkhir).toFixed(2)}</span></td>
-            <td style="font-size:12px;color:var(--muted);">${g.updatedAt?new Date(g.updatedAt).toLocaleString('id-ID',{day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit'}):'-'}</td>
-          </tr>`;}).join('')}
-        </tbody>
-      </table>
-    </div>`;
+    <div class="ph" style="margin-top:32px;"><span class="ey">Riwayat</span><h1>Sudah Dinilai</h1></div>
+    <div class="tw"><table class="riwayat-table">
+      <thead><tr><th>Nama</th><th>Kelompok</th><th>Total Akhir</th><th>Diinput</th></tr></thead>
+      <tbody>${done.map(g=>{
+        const u=(window._aUsers||[]).find(x=>x.username===g.username);
+        return`<tr>
+          <td>${u?u.name:g.username}</td>
+          <td>${u?u.kelompok:'—'}</td>
+          <td><span class="score-chip ${scoreClass(g.nilaiAkhir)}">${parseFloat(g.nilaiAkhir).toFixed(2)}</span></td>
+          <td style="font-size:12px;color:var(--muted);">${g.updatedAt?new Date(g.updatedAt).toLocaleString('id-ID',{day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit'}):'-'}</td>
+        </tr>`;}).join('')}
+      </tbody></table></div>`;
   }catch(_){wrap.innerHTML='';}
 }
 
@@ -982,7 +906,7 @@ async function submitNilaiA(e,username,judul,setBy){
     await api('setGrade',body);
     CACHE={};APP.grades=null;
     toast('Nilai & catatan tersimpan.');
-    
+    // refresh riwayat
     loadRiwayatNilai(judul);
   }catch(err){toast('Gagal: '+err.message);}
   finally{btn.disabled=false;btn.innerHTML='Simpan Nilai & Catatan';}
