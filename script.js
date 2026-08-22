@@ -400,7 +400,7 @@ function escAttr(s) {
   if (s === null || s === undefined) return '';
   return String(s)
     .replace(/\\/g,'\\\\').replace(/'/g,"\\'")
-    .replace(/"/g,'&quot;').replace(/&/g,'&amp;')
+    .replace(/&/g,'&amp;').replace(/"/g,'&quot;')
     .replace(/</g,'&lt;').replace(/>/g,'&gt;');
 }
 const initials = n => esc(n).split(' ').map(w=>w[0]).slice(0,2).join('').toUpperCase();
