@@ -31,6 +31,9 @@ function scoreClass(v) {
 
 /*API*/
 async function api(action, body={}, useCache=false) {
+  // Tahap 2: login & updateProfile lewat Supabase. Sisa 7 action tetap lewat fetch lama (Tahap 4).
+  if (action === 'login')         return apiLogin(body);
+  if (action === 'updateProfile') return apiUpdateProfile(body);
   const cacheKey = action + JSON.stringify(body);
   if (useCache) {
     const cached = cacheGet(cacheKey);
@@ -41,6 +44,93 @@ async function api(action, body={}, useCache=false) {
   if (data.error) throw new Error(data.error);
   if (useCache) cacheSet(cacheKey, data);
   return data;
+}
+
+/* — Supabase auth: login berbasis username, email sintetis {username}@portalfislab.local — */
+async function apiLogin(body) {
+  const username = (body.username || '').trim().toLowerCase();
+  if (!username) throw new Error('Username wajib diisi.');
+  const email = `${username}@portalfislab.local`;
+  const { data, error } = await SB.auth.signInWithPassword({ email, password: body.password });
+  if (error) throw new Error(error.message);
+  const uid = data.user.id;
+  const { data: prof, error: pe } = await SB.from('profiles')
+    .select('username,name,role,nrp,kelompok,wa,photo_path,must_change_password')
+    .eq('id', uid).single();
+  if (pe || !prof) throw new Error('Profil tidak ditemukan untuk user ini.');
+  const user = {
+    username: prof.username,
+    name:     prof.name,
+    role:     prof.role,
+    nrp:      prof.nrp || undefined,
+    kelompok: prof.kelompok,
+    wa:       prof.wa || undefined,
+    photo:    prof.photo_path ? SB.storage.from('avatars').getPublicUrl(prof.photo_path).data.publicUrl : undefined,
+    must_change_password: prof.must_change_password,
+  };
+  if (prof.role === 'aslab') {
+    const { data: meta } = await SB.from('v_aslab_meta')
+      .select('kode_arr,kelompok_arr')
+      .eq('username', prof.username).single();
+    user.kode     = (meta && meta.kode_arr)     || [];
+    user.kelompok = (meta && meta.kelompok_arr) || [];
+  }
+  return { user };
+}
+
+/* — Supabase auth: ganti password + upload foto ke Storage — */
+async function apiUpdateProfile(body) {
+  const ses = getSession();
+  if (!ses) throw new Error('Sesi tidak ditemukan.');
+  const { data: uData } = await SB.auth.getUser();
+  const uid = uData.user.id;
+
+  // 1. Ganti password (jika diminta)
+  if (body.newPassword) {
+    // verifikasi password lama dengan re-auth
+    if (body.oldPassword) {
+      const email = `${ses.username}@portalfislab.local`;
+      const { error: reErr } = await SB.auth.signInWithPassword({ email, password: body.oldPassword });
+      if (reErr) throw new Error('Password saat ini salah.');
+    }
+    const { error: pwErr } = await SB.auth.updateUser({ password: body.newPassword });
+    if (pwErr) throw new Error(pwErr.message);
+  }
+
+  // 2. Upload foto (jika ada) ke Storage bucket avatars, folder {uid}/
+  let photoPath = undefined;
+  if (body.photo) {
+    const blob = dataURLtoBlob(body.photo);
+    if (blob.size > 2 * 1024 * 1024) throw new Error('Ukuran foto maks. 2MB.');
+    if (!blob.type.startsWith('image/')) throw new Error('File harus berupa gambar.');
+    const ext = (blob.type.split('/')[1] || 'png').replace('jpeg', 'jpg');
+    photoPath = `${uid}/avatar.${ext}`;
+    const { error: upErr } = await SB.storage.from('avatars')
+      .upload(photoPath, blob, { upsert: true, contentType: blob.type });
+    if (upErr) throw new Error('Gagal upload foto: ' + upErr.message);
+  }
+
+  // 3. Update profiles (photo_path + reset must_change_password)
+  const updates = {};
+  if (photoPath) updates.photo_path = photoPath;
+  if (body.newPassword) updates.must_change_password = false;
+  if (Object.keys(updates).length > 0) {
+    const { error: upErr } = await SB.from('profiles').update(updates).eq('id', uid);
+    if (upErr) throw new Error('Gagal update profil: ' + upErr.message);
+  }
+
+  const newPhoto = photoPath ? SB.storage.from('avatars').getPublicUrl(photoPath).data.publicUrl : ses.photo;
+  return { user: { ...ses, photo: newPhoto, must_change_password: false } };
+}
+
+/* — helper: konversi data URL (base64) ke Blob untuk upload Storage — */
+function dataURLtoBlob(dataURL) {
+  const [meta, b64] = dataURL.split(',');
+  const mime = (meta.match(/:(.*?);/) || ['', 'image/png'])[1];
+  const bin = atob(b64);
+  const arr = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
+  return new Blob([arr], { type: mime });
 }
 
 /*session*/
@@ -250,6 +340,12 @@ async function showApp(){
   }
 
   renderApp();
+
+  // paksa ganti password sementara — modal tidak bisa ditutup sampai diganti (F4)
+  if (ses.must_change_password) {
+    window._mustChangePassword = true;
+    openEditModal(ses);
+  }
 
   try {
     if (ses.role === 'praktikan') {
@@ -1016,15 +1112,20 @@ async function loadAdminPengguna(ses){
 }
 
 let _pp=null;
-const closeModal=()=>{document.getElementById('modal-root').innerHTML='';_pp=null;};
+const closeModal=()=>{
+  if(window._mustChangePassword) return;  // blokir sampai password diganti
+  document.getElementById('modal-root').innerHTML='';_pp=null;
+};
 function openEditModal(ses){
   if(typeof ses==='string') ses=JSON.parse(ses.replace(/&quot;/g,'"'));
   _pp=null;
+  const mcp = !!window._mustChangePassword;
   document.getElementById('modal-root').innerHTML=`
   <div class="modal-back" id="m-back">
     <div class="modal">
-      <button class="modal-close" onclick="closeModal()">✕</button>
-      <h3>Edit Profil</h3>
+      ${mcp?'':'<button class="modal-close" onclick="closeModal()">✕</button>'}
+      <h3>${mcp?'Wajib Ganti Password':'Edit Profil'}</h3>
+      ${mcp?'<div class="merr" style="margin-bottom:16px;">Akun Anda menggunakan password sementara. Wajib ganti password sebelum bisa melanjutkan.</div>':''}
       <div class="photo-row">
         <div id="pp">${av(ses)}</div>
         <label class="btn btn-white btn-sm" style="cursor:pointer;">${IC.camera} Ganti Foto
@@ -1034,7 +1135,7 @@ function openEditModal(ses){
       <form id="edit-form">
         <div id="edit-err"></div>
         <div class="mfield">
-          <label>Password Saat Ini 
+          <label>Password Saat Ini
             <span style="color:#aaa;font-weight:400;">(isi jika ingin ganti password)</span>
           </label>
           <input type="password" id="cur-p" placeholder="Kosongkan jika hanya ganti foto">
@@ -1062,6 +1163,10 @@ function openEditModal(ses){
   document.getElementById('edit-form').onsubmit=async e=>{
     e.preventDefault();
     const err=document.getElementById('edit-err'),curP=document.getElementById('cur-p').value,newP=document.getElementById('new-p').value,confP=document.getElementById('conf-p').value;
+    if(mcp&&!newP){
+      err.innerHTML='<div class="merr">Wajib mengisi password baru.</div>';
+      return;
+    }
     if(!_pp&&!newP&&!confP){
       err.innerHTML='<div class="merr">Belum ada perubahan.</div>';
       return;
@@ -1077,8 +1182,14 @@ function openEditModal(ses){
       }
     }
     const btn=document.getElementById('btn-sp');btn.disabled=true;btn.innerHTML='<span class="spinner spinner-dk"></span> Menyimpan…';
-    try{await api('updateProfile',{username:ses.username,oldPassword:curP,newPassword:newP||undefined,photo:_pp||undefined});
-      if(_pp)ses.photo=_pp;if(newP)ses.password=newP;setSession(ses);closeModal();toast('Profil berhasil diperbarui.');renderApp();}
+    try{
+      const result=await api('updateProfile',{username:ses.username,oldPassword:curP,newPassword:newP||undefined,photo:_pp||undefined});
+      if(result.user&&result.user.photo) ses.photo=result.user.photo;
+      ses.must_change_password=false;
+      setSession(ses);
+      window._mustChangePassword=false;
+      closeModal();toast('Profil berhasil diperbarui.');renderApp();
+    }
     catch(ex){err.innerHTML=`<div class="merr">${ex.message}</div>`;btn.disabled=false;btn.innerHTML='Simpan Perubahan';}
   };
 }
