@@ -62,6 +62,23 @@ function appendTempPw(username, name, pw) {
   appendFileSync(TEMP_PW_PATH, header + line);
 }
 
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+
+// retry dengan exponential backoff untuk createUser (menghindari rate limit / fetch failed)
+async function createUserWithRetry(payload, maxRetries = 3) {
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    const { data, error } = await sb.auth.admin.createUser(payload);
+    if (!error) return { data };
+    if (attempt < maxRetries && (error.message.includes('fetch failed') || error.message.includes('rate') || error.message.includes('timeout'))) {
+      const delay = 1000 * Math.pow(2, attempt); // 1s, 2s, 4s
+      console.warn(`    retry ${attempt + 1}/${maxRetries} setelah ${delay}ms... (${error.message})`);
+      await sleep(delay);
+      continue;
+    }
+    return { error };
+  }
+}
+
 async function getExistingUsernames() {
   const { data, error } = await sb.from('profiles').select('username');
   if (error) throw error;
@@ -116,18 +133,20 @@ async function migrateUsers() {
       wa: r.wa ? r.wa.trim() : null,
     };
     if (!existing.has(username)) {
-      // AKUN BARU: buat Auth user + password sementara
+      // AKUN BARU: buat Auth user + password sementara (dengan retry + jeda)
       const tempPw = genPassword();
       const email = `${username}@portalfislab.local`;
-      const { data: au, error: ae } = await sb.auth.admin.createUser({
+      const result = await createUserWithRetry({
         email,
         password: tempPw,
         email_confirm: true,
       });
-      if (ae) {
-        console.warn(`  WARNING: gagal buat akun Auth username=${username}: ${ae.message}`);
+      if (result.error) {
+        console.warn(`  WARNING: gagal buat akun Auth username=${username}: ${result.error.message}`);
         skipped++; continue;
       }
+      const au = result.data;
+      await sleep(200); // jeda antar createUser untuk hindari rate limit
       // trigger handle_new_user sudah insert profile default; update dengan data CSV
       const { error: pe } = await sb.from('profiles').update(profRec).eq('id', au.user.id);
       if (pe) {
