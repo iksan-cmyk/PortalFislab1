@@ -29,19 +29,26 @@ function scoreClass(v) {
   return 'd';
 }
 
-/*API*/
+/*API — semua action lewat Supabase (supabase-js). Tidak ada lagi fetch ke Google Apps Script.*/
 async function api(action, body={}, useCache=false) {
-  // Tahap 2: login & updateProfile lewat Supabase. Sisa 7 action tetap lewat fetch lama (Tahap 4).
-  if (action === 'login')         return apiLogin(body);
-  if (action === 'updateProfile') return apiUpdateProfile(body);
   const cacheKey = action + JSON.stringify(body);
   if (useCache) {
     const cached = cacheGet(cacheKey);
     if (cached) return cached;
   }
-  const res = await fetch(API_URL, { method:'POST', body: JSON.stringify({ action, ...body }) });
-  const data = await res.json();
-  if (data.error) throw new Error(data.error);
+  let data;
+  switch (action) {
+    case 'login':         data = await apiLogin(body); break;
+    case 'updateProfile': data = await apiUpdateProfile(body); break;
+    case 'getModules':    data = await apiGetModules(); break;
+    case 'getUsers':      data = await apiGetUsers(); break;
+    case 'getGrades':     data = await apiGetGrades(body); break;
+    case 'getSchedules':  data = await apiGetSchedules(body); break;
+    case 'getRotasi':     data = await apiGetRotasi(body); break;
+    case 'setSchedule':   data = await apiSetSchedule(body); break;
+    case 'setGrade':      data = await apiSetGrade(body); break;
+    default: throw new Error('Unknown action: ' + action);
+  }
   if (useCache) cacheSet(cacheKey, data);
   return data;
 }
@@ -131,6 +138,229 @@ function dataURLtoBlob(dataURL) {
   const arr = new Uint8Array(bin.length);
   for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
   return new Blob([arr], { type: mime });
+}
+
+/* — helper: cache map judul -> module id (dipakai getGrades/getSchedules/setSchedule/setGrade) — */
+let _judulToId = null;
+async function getModuleIdByJudul(judul) {
+  if (!_judulToId) {
+    const { data, error } = await SB.from('modules').select('id,judul');
+    if (error) throw new Error(error.message);
+    _judulToId = new Map();
+    for (const m of data) _judulToId.set(m.judul, m.id);
+  }
+  const id = _judulToId.get(judul);
+  if (!id) throw new Error('Modul tidak ditemukan: ' + judul);
+  return id;
+}
+
+/* — getModules: SELECT dari modules, public (anon bisa baca) — */
+async function apiGetModules() {
+  const { data, error } = await SB.from('modules')
+    .select('id,kode,judul,ringkas,file_url,file_type')
+    .order('id');
+  if (error) throw new Error(error.message);
+  return { modules: (data || []).map(m => ({
+    id: m.id,
+    kode: m.kode,
+    judul: m.judul,
+    ringkas: m.ringkas,
+    fileUrl: m.file_url,
+    fileType: m.file_type,
+  }))};
+}
+
+/* — getUsers: response disesuaikan per role (RLS sudah filter baris) — */
+async function apiGetUsers() {
+  const ses = getSession();
+  if (!ses) {
+    // anon (landing): hanya butuh jumlah aslab untuk stat
+    const { data: count, error } = await SB.rpc('public_aslab_count');
+    if (error) throw new Error(error.message);
+    return { users: Array(count).fill({ role: 'aslab' }) };
+  }
+  // fetch aslab metadata (kode & kelompok array) untuk merge
+  const { data: aslabMeta } = await SB.from('v_aslab_meta')
+    .select('username,kode_arr,kelompok_arr');
+  const metaMap = new Map();
+  for (const m of (aslabMeta || [])) metaMap.set(m.username, m);
+
+  let profiles = [];
+  const cols = 'username,name,role,nrp,kelompok,wa,photo_path';
+  if (ses.role === 'admin') {
+    const { data, error } = await SB.from('profiles').select(cols);
+    if (error) throw new Error(error.message);
+    profiles = data;
+  } else if (ses.role === 'aslab') {
+    const { data: prak, error: e1 } = await SB.from('profiles').select(cols).eq('role', 'praktikan');
+    if (e1) throw new Error(e1.message);
+    const { data: self, error: e2 } = await SB.from('profiles').select(cols).eq('username', ses.username);
+    if (e2) throw new Error(e2.message);
+    profiles = [...(prak || []), ...(self || [])];
+  } else {
+    const { data: aslabs, error: e1 } = await SB.from('profiles').select(cols).eq('role', 'aslab');
+    if (e1) throw new Error(e1.message);
+    const { data: self, error: e2 } = await SB.from('profiles').select(cols).eq('username', ses.username);
+    if (e2) throw new Error(e2.message);
+    profiles = [...(aslabs || []), ...(self || [])];
+  }
+  const users = profiles.map(p => {
+    const u = {
+      username: p.username,
+      name: p.name,
+      role: p.role,
+      nrp: p.nrp || undefined,
+      kelompok: p.kelompok,
+      wa: p.wa || undefined,
+      photo: p.photo_path ? SB.storage.from('avatars').getPublicUrl(p.photo_path).data.publicUrl : undefined,
+    };
+    if (p.role === 'aslab') {
+      const meta = metaMap.get(p.username);
+      u.kode = (meta && meta.kode_arr) || [];
+      u.kelompok = (meta && meta.kelompok_arr) || [];
+    }
+    return u;
+  });
+  return { users };
+}
+
+/* — getGrades: body {username?} dan/atau {judul?} (judul = full module title) — */
+async function apiGetGrades(body) {
+  let query = SB.from('grades').select(`
+    username, module_id, set_by, updated_at, nilai_akhir,
+    prelab, inlab, abstrak, pendahuluan, metodologi, analisis, pembahasan, kesimpulan, format, plagiasi,
+    cat_prelab, cat_inlab, cat_abstrak, cat_pendahuluan, cat_metodologi, cat_analisis, cat_pembahasan, cat_kesimpulan, cat_format, cat_plagiasi,
+    modules:module_id(judul)
+  `);
+  if (body.username) query = query.eq('username', body.username);
+  if (body.judul) {
+    const modId = await getModuleIdByJudul(body.judul);
+    query = query.eq('module_id', modId);
+  }
+  const { data, error } = await query;
+  if (error) throw new Error(error.message);
+  return { grades: (data || []).map(g => ({
+    judul: (g.modules && g.modules.judul) || g.module_id,
+    username: g.username,
+    nilaiAkhir: g.nilai_akhir !== null ? String(g.nilai_akhir) : '',
+    setBy: g.set_by,
+    updatedAt: g.updated_at,
+    prelab: g.prelab ?? '', inlab: g.inlab ?? '', abstrak: g.abstrak ?? '',
+    pendahuluan: g.pendahuluan ?? '', metodologi: g.metodologi ?? '',
+    analisis: g.analisis ?? '', pembahasan: g.pembahasan ?? '',
+    kesimpulan: g.kesimpulan ?? '', format: g.format ?? '', plagiasi: g.plagiasi ?? '',
+    catPrelab: g.cat_prelab || '', catInlab: g.cat_inlab || '',
+    catAbstrak: g.cat_abstrak || '', catPendahuluan: g.cat_pendahuluan || '',
+    catMetodologi: g.cat_metodologi || '', catAnalisis: g.cat_analisis || '',
+    catPembahasan: g.cat_pembahasan || '', catKesimpulan: g.cat_kesimpulan || '',
+    catFormat: g.cat_format || '', catPlagiasi: g.cat_plagiasi || '',
+  }))};
+}
+
+/* — getSchedules: body {kelompok?} dan/atau {judul?} (judul = full module title) — */
+async function apiGetSchedules(body) {
+  let query = SB.from('schedules')
+    .select('module_id, kelompok, tanggal, sesi, set_by, updated_at, modules:module_id(judul)');
+  if (body.kelompok) query = query.eq('kelompok', parseInt(body.kelompok));
+  if (body.judul) {
+    const modId = await getModuleIdByJudul(body.judul);
+    query = query.eq('module_id', modId);
+  }
+  const { data, error } = await query;
+  if (error) throw new Error(error.message);
+  return { schedules: (data || []).map(s => ({
+    judul: (s.modules && s.modules.judul) || s.module_id,
+    kelompokId: s.kelompok,
+    tanggal: s.tanggal,
+    sesi: s.sesi,
+    setBy: s.set_by,
+    updatedAt: s.updated_at,
+  }))};
+}
+
+/* — getRotasi: body {kelompok?} atau {kode:'E1,E2'} — */
+async function apiGetRotasi(body) {
+  let query = SB.from('rotasi')
+    .select('kelompok, minggu, aslab_username, modules:module_id(id, kode, judul)');
+  if (body.kelompok) query = query.eq('kelompok', parseInt(body.kelompok));
+  if (body.kode) {
+    const kodeList = body.kode.split(',').map(k => k.trim()).filter(Boolean);
+    const { data: mods, error: me } = await SB.from('modules').select('id').in('kode', kodeList);
+    if (me) throw new Error(me.message);
+    const modIds = (mods || []).map(m => m.id);
+    if (modIds.length === 0) return { rotasi: [] };
+    query = query.in('module_id', modIds);
+  }
+  const { data, error } = await query;
+  if (error) throw new Error(error.message);
+  // fetch aslab names untuk aslab_username -> name
+  const aslabUsernames = [...new Set((data || []).map(r => r.aslab_username).filter(Boolean))];
+  let nameMap = new Map();
+  if (aslabUsernames.length > 0) {
+    const { data: aslabs } = await SB.from('profiles').select('username,name').in('username', aslabUsernames);
+    for (const a of (aslabs || [])) nameMap.set(a.username, a.name);
+  }
+  return { rotasi: (data || []).map(r => ({
+    kode: (r.modules && r.modules.kode) || '',
+    judul: (r.modules && r.modules.id) || '',
+    judulPanjang: (r.modules && r.modules.judul) || '',
+    kelompok: r.kelompok,
+    minggu: r.minggu,
+    aslab: r.aslab_username ? (nameMap.get(r.aslab_username) || null) : null,
+  }))};
+}
+
+/* — setSchedule: body {kelompokId, judul, tanggal, sesi, setBy}. tanggal kosong = delete. — */
+async function apiSetSchedule(body) {
+  const moduleId = await getModuleIdByJudul(body.judul);
+  const kelompok = parseInt(body.kelompokId);
+  if (!body.tanggal) {
+    const { error } = await SB.from('schedules')
+      .delete().eq('module_id', moduleId).eq('kelompok', kelompok);
+    if (error) throw new Error(error.message);
+    return { success: true };
+  }
+  const { error } = await SB.from('schedules')
+    .upsert({
+      module_id: moduleId,
+      kelompok,
+      tanggal: body.tanggal,
+      sesi: body.sesi,
+      set_by: body.setBy,
+      updated_at: new Date().toISOString(),
+    }, { onConflict: 'module_id,kelompok' });
+  if (error) throw new Error(error.message);
+  return { success: true };
+}
+
+/* — setGrade: body {username, judul, setBy, 10 komponen, 10 catatan, nilaiAkhir(ignored)}.
+   nilai_akhir dihitung ulang oleh trigger recompute_nilai_akhir di server. — */
+async function apiSetGrade(body) {
+  const moduleId = await getModuleIdByJudul(body.judul);
+  const rec = {
+    username: body.username,
+    module_id: moduleId,
+    set_by: body.setBy,
+    updated_at: new Date().toISOString(),
+  };
+  const KOMP = ['prelab','inlab','abstrak','pendahuluan','metodologi','analisis','pembahasan','kesimpulan','format','plagiasi'];
+  const CAT = [
+    ['catPrelab','cat_prelab'], ['catInlab','cat_inlab'], ['catAbstrak','cat_abstrak'],
+    ['catPendahuluan','cat_pendahuluan'], ['catMetodologi','cat_metodologi'],
+    ['catAnalisis','cat_analisis'], ['catPembahasan','cat_pembahasan'],
+    ['catKesimpulan','cat_kesimpulan'], ['catFormat','cat_format'], ['catPlagiasi','cat_plagiasi'],
+  ];
+  for (const k of KOMP) {
+    if (body[k] !== undefined && body[k] !== '') rec[k] = parseFloat(body[k]);
+  }
+  for (const [camel, snake] of CAT) {
+    if (body[camel] !== undefined) rec[snake] = body[camel] || null;
+  }
+  // nilaiAkhir sengaja TIDAK dikirim — trigger recompute_nilai_akhir menghitung ulang di server
+  const { error } = await SB.from('grades')
+    .upsert(rec, { onConflict: 'username,module_id' });
+  if (error) throw new Error(error.message);
+  return { success: true };
 }
 
 /*session*/
@@ -644,12 +874,9 @@ async function loadKontakP(ses){
       <div class="ph"><h1>Kontak Asisten Lab</h1></div>
       <div class="g g2">
         ${list.map(a=>{
-          const m=mods.find(x=>x.id===a.judul);
-          const judulLabel=m?m.judul:a.judul;
-          const kodeLabel=m?m.kode:'-';
           const waNum = a.wa ? a.wa.replace(/\D/g,'') : '';
           return`<div class="card" style="padding:0;overflow:hidden;border-radius:20px;cursor:pointer;"
-          onclick="openKontakPanel('${a.name}','${judulLabel}','${a.photo||''}','${initials(a.name)}','${waNum}')"            <!-- header gradient -->
+          onclick="openKontakPanel('${a.name}','${Array.isArray(a.kode)?a.kode.join(', '):''}','${a.photo||''}','${initials(a.name)}','${waNum}')"            <!-- header gradient -->
             <div style="height:110px;background:linear-gradient(135deg,#1B39B0,#8C4FEB,#FEA3DB);position:relative;">
               <div style="position:absolute;bottom:-28px;left:20px;
                 width:56px;height:56px;border-radius:50%;border:3px solid var(--surface);overflow:hidden;
@@ -1082,10 +1309,9 @@ async function loadAdminPengguna(ses){
     </div>
       <span class="slabel">Asisten Lab (${aslabs.length})</span>
       <div class="g g3" style="margin-bottom:28px;">${aslabs.map(a=>{
-        const m=mods.find(x=>x.id===a.judul);
         return`<div class="card">
           <h3>${a.name}</h3>
-          <p>${m?m.judul:a.judul}</p>
+          <p>${Array.isArray(a.kode)&&a.kode.length?a.kode.join(', '):'—'}</p>
           <span class="tag blue" style="margin-top:8px;">Kelompok ${Array.isArray(a.kelompok)?a.kelompok.join(', '):a.kelompok}</span>
           </div>`;}).join('')}
       </div>
