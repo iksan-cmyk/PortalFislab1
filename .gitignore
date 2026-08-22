@@ -1,0 +1,20 @@
+# Environment variables (jangan pernah commit nilai asli)
+.env
+.env.local
+.env.*.local
+
+# Node
+node_modules/
+
+# Password sementara hasil migrasi — SENSITIF, jangan pernah ter-commit.
+# Dihapus dari disk setelah dibagikan manual ke tiap pengguna.
+migration/temp_passwords.csv
+
+# Ekspor CSV asli dari Google Sheets berisi password plaintext lama —
+# SENSITIF, jangan pernah ter-commit meski repo private.
+migration/*.csv
+!migration/.gitkeep
+
+# Build output
+.vercel/
+dist/
