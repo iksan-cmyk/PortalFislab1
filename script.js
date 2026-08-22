@@ -388,10 +388,25 @@ function cacheGet(key) {
 }
 
 /*helpers*/
-const initials = n => n.split(' ').map(w=>w[0]).slice(0,2).join('').toUpperCase();
+function esc(s) {
+  if (s === null || s === undefined) return '';
+  return String(s)
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+    .replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+}
+// escAttr: untuk nilai di dalam onclick="fn('...')" — HTML entity tidak cukup
+// karena browser decode entity sebelum JS jalan. Butuh JS-string escape + HTML escape.
+function escAttr(s) {
+  if (s === null || s === undefined) return '';
+  return String(s)
+    .replace(/\\/g,'\\\\').replace(/'/g,"\\'")
+    .replace(/"/g,'&quot;').replace(/&/g,'&amp;')
+    .replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+const initials = n => esc(n).split(' ').map(w=>w[0]).slice(0,2).join('').toUpperCase();
 function av(user, extra='') {
   const cls='av'+(extra?' '+extra:'');
-  if(user.photo) return `<div class="${cls}"><img src="${user.photo}" alt="${user.name}"></div>`;
+  if(user.photo) return `<div class="${cls}"><img src="${user.photo}" alt="${esc(user.name)}"></div>`;
   return `<div class="${cls}">${initials(user.name)}</div>`;
 }
 function toast(msg) {
@@ -474,10 +489,10 @@ function openViewer(mod) {
     <div class="viewer-back" id="vback">
       <div class="viewer-box">
         <div class="viewer-head">
-          <h3>${mod.judul}</h3>
+          <h3>${esc(mod.judul)}</h3>
           <div style="display:flex;gap:8px;align-items:center;">
             <span class="tag ${mod.fileType==='pdf'?'':'blue'}" style="font-size:11px;">${mod.fileType==='pdf'?'pdf':'Docs'}</span>
-            <a href="${mod.fileUrl}" target="_blank" class="btn btn-ghost" style="color:#fff;height:32px;font-size:12px;">Buka tab baru ↗</a>
+            <a href="${esc(mod.fileUrl)}" target="_blank" class="btn btn-ghost" style="color:#fff;height:32px;font-size:12px;">Buka tab baru ↗</a>
             <button class="btn btn-ghost" style="color:#fff;height:32px;" onclick="closeViewer()">✕</button>
           </div>
         </div>
@@ -485,7 +500,7 @@ function openViewer(mod) {
           <div class="viewer-loading" id="vload"><div class="spinner"></div>Memuat…</div>
           <iframe src="${src}" style="display:none;"
             onload="document.getElementById('vload').style.display='none';this.style.display='block';"
-            allow="fullscreen" title="${mod.judul}"></iframe>
+            allow="fullscreen" title="${esc(mod.judul)}"></iframe>
         </div>
       </div>
     </div>`;
@@ -500,9 +515,9 @@ async function loadLandingModules() {
     const mods = await getMods();
     document.getElementById('mod-grid').innerHTML =
       mods.map((m,i)=>`
-        <div class="mod-card-land" onclick='openViewer(${JSON.stringify(m).replace(/'/g,"&#39;")})'>
+        <div class="mod-card-land" onclick='openViewer(${escAttr(JSON.stringify(m))})'>
           <span class="mod-num">${String(i+1).padStart(2,'0')}</span>
-          <h3>${m.judul}</h3>
+          <h3>${esc(m.judul)}</h3>
           <span class="mod-type-badge ${m.fileType==='pdf'?'pdf':'docs'}">${m.fileType==='pdf'?'pdf':'Docs'}</span>
         </div>`).join('');
     try {
@@ -510,7 +525,7 @@ async function loadLandingModules() {
       document.getElementById('stat-aslab').textContent=users.filter(u=>u.role==='aslab').length;
     }catch(_){}
   } catch(e) {
-    document.getElementById('mod-grid').innerHTML=`<p style="color:#9497a8;font-size:13px;">Gagal: ${e.message}</p>`;
+    document.getElementById('mod-grid').innerHTML=`<p style="color:#9497a8;font-size:13px;">Gagal: ${esc(e.message)}</p>`;
   }
 }
 
@@ -536,7 +551,7 @@ function initLoginPanel() {
       console.log("LOGIN RESPONSE", user);
       setSession(user); closePanel(); showApp();
     } catch(err) {
-      errEl.innerHTML=`<div class="login-err">${err.message}</div>`;
+      errEl.innerHTML=`<div class="login-err">${esc(err.message)}</div>`;
     } finally { btn.disabled=false; btn.innerHTML='Masuk'; }
   });
 }
@@ -621,11 +636,11 @@ function renderApp() {
   const sbAv   = document.getElementById('sb-av');
   if (sbName) sbName.textContent = ses.name;
   if (sbRole) sbRole.textContent = roleLabel(ses);
-  if (sbAv)   sbAv.innerHTML = ses.photo ? `<img src="${ses.photo}" alt="${ses.name}">` : initials(ses.name);
+  if (sbAv)   sbAv.innerHTML = ses.photo ? `<img src="${ses.photo}" alt="${esc(ses.name)}">` : initials(ses.name);
 
   // mobile actions
   const mobAv = document.getElementById('mob-av');
-  if (mobAv) mobAv.innerHTML = ses.photo ? `<img src="${ses.photo}" alt="${ses.name}">` : initials(ses.name);
+  if (mobAv) mobAv.innerHTML = ses.photo ? `<img src="${ses.photo}" alt="${esc(ses.name)}">` : initials(ses.name);
   const mobLogout = document.getElementById('btn-logout-mob');
   if (mobLogout) mobLogout.onclick = () => { clearSession(); CACHE={}; showLanding(); };
 
@@ -740,8 +755,8 @@ async function loadProfilP(ses){
     setContent(`<div class="phero">
       ${av(ses,'av-lg')}
       <div style="flex:1">
-        <h2>Selamat Datang, ${ses.name}</h2>
-        <p>NRP ${ses.nrp||'—'} · Kelompok ${ses.kelompok}</p>
+        <h2>Selamat Datang, ${esc(ses.name)}</h2>
+        <p>NRP ${esc(ses.nrp||'—')} · Kelompok ${esc(ses.kelompok)}</p>
       </div>
       </div>
       <div class="tw">
@@ -757,7 +772,7 @@ async function loadProfilP(ses){
             const s=schedules.find(x=>x.judul===m.id||x.judul===m.judul),g=grades.find(x=>x.judul===m.id||x.judul===m.judul);
             const na=g&&g.nilaiAkhir!==''?parseFloat(g.nilaiAkhir):null;
             return`<tr>
-              <td>${m.judul}</td>
+              <td>${esc(m.judul)}</td>
               <td>${s?fmtTgl(s.tanggal)+' · '+s.sesi:'<span class="tag">Belum dijadwalkan</span>'}</td>
               <td>${na!==null?`<span class="score-chip ${scoreClass(na)}">${na}</span>`:'<span class="tag">—</span>'}</td>
             </tr>`;
@@ -765,7 +780,7 @@ async function loadProfilP(ses){
           </tbody>
         </table>
         </div>`);
-  }catch(e){setContent(`<p style="color:red">${e.message}</p>`);}
+  }catch(e){setContent(`<p style="color:red">${esc(e.message)}</p>`);}
 }
 async function loadModulP(){
   setContent(loading('Memuat modul…'));
@@ -773,12 +788,12 @@ async function loadModulP(){
     const mods=await getMods();
     setContent(`<div class="ph"><span class="ey">Materi</span><h1>Modul Praktikum</h1></div>
       <div class="g g3">${mods.map((m,i)=>`
-        <div class="card card-click" onclick='openViewer(${JSON.stringify(m).replace(/'/g,"&#39;")})'>
+        <div class="card card-click" onclick='openViewer(${escAttr(JSON.stringify(m))})'>
           <span style="font-size:11px;color:var(--muted);display:block;margin-bottom:10px;">${String(i+1).padStart(2,'0')}</span>
-          <h3>${m.judul}</h3><p>${m.ringkas}</p>
+          <h3>${esc(m.judul)}</h3><p>${esc(m.ringkas)}</p>
           <span class="tag ${m.fileType==='pdf'?'':'blue'}" style="margin-top:10px;font-size:10px;">${m.fileType==='pdf'?'PDF':'Docs'}</span>
         </div>`).join('')}</div>`);
-  }catch(e){setContent(`<p style="color:red">${e.message}</p>`);}
+  }catch(e){setContent(`<p style="color:red">${esc(e.message)}</p>`);}
 }
 async function loadJadwalP(ses){
   setContent(loading());
@@ -790,7 +805,7 @@ async function loadJadwalP(ses){
     setContent(`
     <div class="ph">
       <span class="ey">Jadwal</span>
-      <h1>Jadwal Praktikum — Kelompok ${ses.kelompok}</h1>
+      <h1>Jadwal Praktikum — Kelompok ${esc(ses.kelompok)}</h1>
     </div>
     <div class="g g3">
       ${rotasi.map(r=>{
@@ -799,12 +814,12 @@ async function loadJadwalP(ses){
           <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:8px;">
             <div style="background:var(--blue);color:#fff;border-radius:10px;padding:6px 10px;
               font-size:12px;font-weight:700;letter-spacing:.03em;flex-shrink:0;">
-              ${r.kode||r.judul.slice(0,4).toUpperCase()}
+              ${esc(r.kode||r.judul.slice(0,4).toUpperCase())}
             </div>
             <span class="tag ${s?'green':''}" style="font-size:11px;">${s?'Terjadwal':'Belum'}</span>
           </div>
           <div>
-            <div style="font-size:15px;font-weight:600;color:var(--text);margin-bottom:2px;">${r.judulPanjang||r.judul}</div>
+            <div style="font-size:15px;font-weight:600;color:var(--text);margin-bottom:2px;">${esc(r.judulPanjang||r.judul)}</div>
             <div style="font-size:12px;color:var(--muted);">Minggu ke-${r.minggu||''}</div>
           </div>
           <div style="border-top:1px solid var(--border);padding-top:10px;display:flex;flex-direction:column;gap:6px;">
@@ -812,7 +827,7 @@ async function loadJadwalP(ses){
               <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                 <circle cx="12" cy="8" r="4"/><path d="M4 21c1.5-4 5-6 8-6s6.5 2 8 6"/>
               </svg>
-              ${r.aslab||'—'}
+              ${esc(r.aslab||'—')}
             </div>
             <div style="background:var(--off);border-left:3px solid ${s?'var(--blue)':'var(--border)'};
               padding:7px 10px;border-radius:0 8px 8px 0;font-size:13px;font-weight:500;color:var(--text);">
@@ -822,7 +837,7 @@ async function loadJadwalP(ses){
         </div>`;
       }).join('')}
     </div>`);
-  }catch(e){setContent(`<p style="color:red">${e.message}</p>`);}
+  }catch(e){setContent(`<p style="color:red">${esc(e.message)}</p>`);}
 }
 async function loadNilaiP(ses){
   setContent(loading());
@@ -836,7 +851,7 @@ async function loadNilaiP(ses){
           const hasCat=KOMP.some(k=>g[k.cat]);
           return`<div class="ncard" id="nc-${m.id}">
             <div class="ncard-head" onclick="toggleNcard('${m.id}')">
-              <span class="ncard-title">${m.judul}</span>
+              <span class="ncard-title">${esc(m.judul)}</span>
               <div class="ncard-meta">
                 ${hasCat?`<span class="tag amber" style="font-size:10px;">Ada catatan</span>`:''}
                 ${total?`<span class="ncard-total">${parseFloat(total).toFixed(2)}</span>`:'<span class="tag" style="font-size:11px;">Belum dinilai</span>'}
@@ -851,13 +866,13 @@ async function loadNilaiP(ses){
                   return`<div class="nrow">
                     <div class="nrow-label">${k.label}<span class="nrow-bobot">(${k.bobot}%)</span></div>
                     <div class="nrow-score${score===null?' na':''}">${score!==null?score:'—'}</div>
-                    ${cat?`<div class="nrow-cat">✎ ${cat}</div>`:`<div class="nrow-cat empty">Belum ada catatan</div>`}
+                    ${cat?`<div class="nrow-cat">✎ ${esc(cat)}</div>`:`<div class="nrow-cat empty">Belum ada catatan</div>`}
                   </div>`;}).join('')}
               </div>
             </div>
           </div>`;}).join('')}
       </div>`);
-  }catch(e){setContent(`<p style="color:red">${e.message}</p>`);}
+  }catch(e){setContent(`<p style="color:red">${esc(e.message)}</p>`);}
 }
 function toggleNcard(id){
   const el=document.getElementById('nc-'+id);
@@ -876,7 +891,7 @@ async function loadKontakP(ses){
         ${list.map(a=>{
           const waNum = a.wa ? a.wa.replace(/\D/g,'') : '';
           return`<div class="card" style="padding:0;overflow:hidden;border-radius:20px;cursor:pointer;"
-          onclick="openKontakPanel('${a.name}','${Array.isArray(a.kode)?a.kode.join(', '):''}','${a.photo||''}','${initials(a.name)}','${waNum}')"            <!-- header gradient -->
+          onclick="openKontakPanel('${escAttr(a.name)}','${Array.isArray(a.kode)?escAttr(a.kode.join(', ')):''}','${a.photo||''}','${initials(a.name)}','${waNum}')"            <!-- header gradient -->
             <div style="height:110px;background:linear-gradient(135deg,#1B39B0,#8C4FEB,#FEA3DB);position:relative;">
               <div style="position:absolute;bottom:-28px;left:20px;
                 width:56px;height:56px;border-radius:50%;border:3px solid var(--surface);overflow:hidden;
@@ -888,14 +903,14 @@ async function loadKontakP(ses){
             <!-- content -->
             <div style="padding:38px 20px 20px;display:flex;align-items:flex-end;justify-content:space-between;gap:12px;flex-wrap:wrap;">
               <div>
-                <div style="font-size:15px;font-weight:600;color:var(--text);">${a.name}</div>
+                <div style="font-size:15px;font-weight:600;color:var(--text);">${esc(a.name)}</div>
                 <div style="font-size:12px;color:var(--muted);margin-top:2px;">Asisten Laboratorium</div>
               </div>
             </div>
           </div>`;
         }).join('')}
       </div>`);
-  }catch(e){setContent(`<p style="color:red">${e.message}</p>`);}
+  }catch(e){setContent(`<p style="color:red">${esc(e.message)}</p>`);}
 }
 function openKontakPanel(name, judul, photo, inits, waNum) {
   const ses = getSession();
@@ -917,15 +932,15 @@ function openKontakPanel(name, judul, photo, inits, waNum) {
       </div>
       <!-- body -->
       <div style="padding:44px 24px 24px;text-align:center;">
-        <div style="font-size:17px;font-weight:600;color:var(--text);margin-bottom:4px;">${name}</div>
+        <div style="font-size:17px;font-weight:600;color:var(--text);margin-bottom:4px;">${esc(name)}</div>
         <div style="font-size:12px;color:var(--muted);margin-bottom:24px;">Asisten Laboratorium</div>
         <!-- template tetap, hanya bagian isi yang diedit -->
         <div style="background:var(--off);border:1px solid var(--border);border-radius:14px;
           padding:14px;font-size:13px;color:var(--muted);text-align:left;margin-bottom:12px;line-height:1.7;">
-          Halo Kak <b style="color:var(--text);">${name}</b>, perkenalkan saya:<br>
-          Nama: <b style="color:var(--text);">${ses.name}</b><br>
-          NRP: <b style="color:var(--text);">${ses.nrp||'—'}</b><br>
-          Kelompok: <b style="color:var(--text);">${ses.kelompok}</b>
+          Halo Kak <b style="color:var(--text);">${esc(name)}</b>, perkenalkan saya:<br>
+          Nama: <b style="color:var(--text);">${esc(ses.name)}</b><br>
+          NRP: <b style="color:var(--text);">${esc(ses.nrp||'—')}</b><br>
+          Kelompok: <b style="color:var(--text);">${esc(ses.kelompok)}</b>
         </div>
         <textarea id="pesanTA" rows="3" style="width:100%;border:1px solid var(--border);border-radius:14px;
           padding:14px;font-size:13px;resize:none;
@@ -933,7 +948,7 @@ function openKontakPanel(name, judul, photo, inits, waNum) {
           placeholder="Tulis keperluanmu di sini…"></textarea>
         ${waNum
           ?`<a id="waLink" href="#"
-              onclick="event.preventDefault();kirimWA('${waNum}','${name}','${encodeURIComponent(ses.name)}','${ses.nrp||''}','${ses.kelompok}')"
+              onclick="event.preventDefault();kirimWA('${escAttr(waNum)}','${escAttr(name)}','${encodeURIComponent(ses.name)}','${escAttr(ses.nrp||'')}','${escAttr(String(ses.kelompok))}')"
               style="display:flex;align-items:center;justify-content:center;gap:8px;
                 width:100%;height:50px;margin-top:14px;border-radius:100px;
                 background:var(--blue);color:#fff;font-size:14px;font-weight:600;cursor:pointer;">
@@ -978,13 +993,13 @@ function renderAslab(hash,ses){const path=hash||'/a/jadwal';buildNav(NAV_A,path)
 }
 function loadProfilA(ses){
   console.log("SESSION", JSON.stringify(ses, null, 2));
-  setContent(`<div class="phero">${av(ses,'av-lg')}<div style="flex:1"><h2>${ses.name}</h2><p>Asisten Lab</p></div>
+  setContent(`<div class="phero">${av(ses,'av-lg')}<div style="flex:1"><h2>${esc(ses.name)}</h2><p>Asisten Lab</p></div>
     </div>
     <div class="g g2">
-      <div class="card"><h3>${Array.isArray(ses.kelompok)?ses.kelompok.length:0} Kelompok</h3><p>Kelompok ${Array.isArray(ses.kelompok)?ses.kelompok.join(', '):ses.kelompok}</p></div>
+      <div class="card"><h3>${Array.isArray(ses.kelompok)?ses.kelompok.length:0} Kelompok</h3><p>Kelompok ${Array.isArray(ses.kelompok)?esc(ses.kelompok.join(', ')):esc(ses.kelompok)}</p></div>
       <div class="card">
         <h3 style="font-size:15px;">
-          ${ses.kode}
+          ${esc(Array.isArray(ses.kode)?ses.kode.join(', '):ses.kode)}
         </h3>
         <p>Judul yang kamu pegang</p>
       </div>
@@ -1015,21 +1030,21 @@ async function loadJadwalA(ses){
       <div style="margin-bottom:28px;">
         <div style="display:flex;align-items:center;gap:10px;margin-bottom:14px;">
           <span style="background:var(--blue);color:#fff;border-radius:8px;padding:4px 10px;
-            font-size:12px;font-weight:700;">${mod.kode}</span>
-          <span style="font-size:15px;font-weight:500;color:var(--text);">${mod.judul}</span>
+            font-size:12px;font-weight:700;">${esc(mod.kode)}</span>
+          <span style="font-size:15px;font-weight:500;color:var(--text);">${esc(mod.judul)}</span>
         </div>
         <div class="g g2">
           ${myRotasi.map(r=>{
             const s = schedules.find(x => x.judul===mod.judul && +x.kelompokId===+r.kelompok);
             return`<div class="card">
               <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;">
-                <h3>Kelompok ${r.kelompok}</h3>
-                <span class="tag" style="font-size:11px;">Minggu ke-${r.minggu}</span>
+                <h3>Kelompok ${esc(r.kelompok)}</h3>
+                <span class="tag" style="font-size:11px;">Minggu ke-${esc(r.minggu)}</span>
               </div>
               <p style="margin-bottom:14px;font-size:13px;color:var(--muted);">
-                ${s?'Terjadwal: '+fmtTgl(s.tanggal)+' · '+s.sesi:'Belum dijadwalkan'}
+                ${s?'Terjadwal: '+fmtTgl(s.tanggal)+' · '+esc(s.sesi):'Belum dijadwalkan'}
               </p>
-              <form onsubmit="submitJadwal(event,'${r.kelompok}','${mod.judul}','${ses.username}')">
+              <form onsubmit="submitJadwal(event,'${escAttr(r.kelompok)}','${escAttr(mod.judul)}','${escAttr(ses.username)}')">
                 <div class="fr">
                   <div class="ff"><label>Tanggal</label>
                     <input type="date" name="tanggal" value="${s?s.tanggal:''}" required></div>
@@ -1040,7 +1055,7 @@ async function loadJadwalA(ses){
                 <div style="margin-top:12px;display:flex;gap:10px;">
                   <button type="submit" class="btn btn-primary btn-sm">Simpan</button>
                   ${s?`<button type="button" class="btn btn-ghost-dk btn-sm"
-                    onclick="hapusJadwal('${r.kelompok}','${mod.judul}','${ses.username}')">Hapus</button>`:''}
+                    onclick="hapusJadwal('${escAttr(r.kelompok)}','${escAttr(mod.judul)}','${escAttr(ses.username)}')">Hapus</button>`:''}
                 </div>
               </form>
             </div>`;
@@ -1048,7 +1063,7 @@ async function loadJadwalA(ses){
         </div>
       </div>`;
     }).join('')}`);
-  }catch(e){setContent(`<p style="color:red">${e.message}</p>`);}
+  }catch(e){setContent(`<p style="color:red">${esc(e.message)}</p>`);}
 }
 async function submitJadwal(e,kelompokId,judul,setBy){
   e.preventDefault();const fd=new FormData(e.target);const btn=e.target.querySelector('button[type=submit]');
@@ -1084,7 +1099,7 @@ async function loadNilaiA(ses){
       <div class="ff"><label>Modul</label>
         <select id="a-mod-sel" onchange="aModChange(this)">
           <option value="">Pilih modul</option>
-          ${myMods.map(m=>`<option value="${m.judul}">${m.kode} — ${m.judul}</option>`).join('')}
+          ${myMods.map(m=>`<option value="${esc(m.judul)}">${esc(m.kode)} — ${esc(m.judul)}</option>`).join('')}
         </select></div>
       <div class="ff"><label>Kelompok</label>
         <select id="a-grp-sel" disabled onchange="aGrpChange(this)">
@@ -1110,15 +1125,15 @@ async function loadNilaiA(ses){
           const u=(users||[]).find(x=>x.username===g.username);
           const mod=myMods.find(m=>m.judul===g.judul);
           return`<tr>
-            <td>${u?u.name:g.username}</td>
-            <td>${mod?`<span class="tag blue" style="font-size:10px;">${mod.kode}</span>`:g.judul}</td>
-            <td>${u?u.kelompok:'—'}</td>
+            <td>${u?esc(u.name):esc(g.username)}</td>
+            <td>${mod?`<span class="tag blue" style="font-size:10px;">${esc(mod.kode)}</span>`:esc(g.judul)}</td>
+            <td>${u?esc(u.kelompok):'—'}</td>
             <td><span class="score-chip ${scoreClass(g.nilaiAkhir)}">${parseFloat(g.nilaiAkhir).toFixed(2)}</span></td>
             <td style="font-size:12px;color:var(--muted);">${g.updatedAt?new Date(g.updatedAt).toLocaleString('id-ID',{day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit'}):'-'}</td>
           </tr>`;}).join('')}
         </tbody></table></div>`;
     }
-  }catch(e){setContent(`<p style="color:red">${e.message}</p>`);}
+  }catch(e){setContent(`<p style="color:red">${esc(e.message)}</p>`);}
 }
 
 function aModChange(sel){
@@ -1160,8 +1175,8 @@ async function loadRiwayatNilai(judul){
       <tbody>${done.map(g=>{
         const u=(window._aUsers||[]).find(x=>x.username===g.username);
         return`<tr>
-          <td>${u?u.name:g.username}</td>
-          <td>${u?u.kelompok:'—'}</td>
+          <td>${u?esc(u.name):esc(g.username)}</td>
+          <td>${u?esc(u.kelompok):'—'}</td>
           <td><span class="score-chip ${scoreClass(g.nilaiAkhir)}">${parseFloat(g.nilaiAkhir).toFixed(2)}</span></td>
           <td style="font-size:12px;color:var(--muted);">${g.updatedAt?new Date(g.updatedAt).toLocaleString('id-ID',{day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit'}):'-'}</td>
         </tr>`;}).join('')}
@@ -1176,7 +1191,7 @@ function aGrpChange(sel){
   const list=(window._aUsers||[]).filter(u=>u.role==='praktikan'&&+u.kelompok===+sel.value);
   stu.disabled=false;
   stu.innerHTML='<option value="">Pilih praktikan</option>'+
-    list.map(u=>`<option value="${u.username}">${u.name}</option>`).join('');
+    list.map(u=>`<option value="${esc(u.username)}">${esc(u.name)}</option>`).join('');
 }
 
 async function aStuChange(sel){
@@ -1192,8 +1207,8 @@ async function aStuChange(sel){
     const total=hitungTotal(g);
     wrap.innerHTML=`
     <div class="card">
-      <h3 style="margin-bottom:20px;">Nilai untuk ${u?u.name:sel.value}</h3>
-      <form onsubmit="submitNilaiA(event,'${sel.value}','${judul}','${setBy}')">
+      <h3 style="margin-bottom:20px;">Nilai untuk ${u?esc(u.name):esc(sel.value)}</h3>
+      <form onsubmit="submitNilaiA(event,'${escAttr(sel.value)}','${escAttr(judul)}','${escAttr(setBy)}')">
         <div class="total-preview">
           <div class="label">Total Akhir (auto-hitung)</div>
           <div class="score" id="total-preview-val">${total?total.toFixed(2):'—'}</div>
@@ -1205,7 +1220,7 @@ async function aStuChange(sel){
             <div class="nform-num"><input type="number" name="${k.key}" min="0" max="100"
               value="${g[k.key]||''}" placeholder="—" oninput="updateTotal(this.form)"></div>
             <div class="nform-cat"><textarea name="${k.cat}"
-              placeholder="Catatan…" rows="1">${g[k.cat]||''}</textarea></div>
+              placeholder="Catatan…" rows="1">${esc(g[k.cat]||'')}</textarea></div>
           </div>`).join('')}
         </div>
         <button type="submit" class="btn btn-primary" id="btn-save-grade"
@@ -1214,7 +1229,7 @@ async function aStuChange(sel){
         </button>
       </form>
     </div>`;
-  }catch(err){wrap.innerHTML=`<p style="color:red">${err.message}</p>`;}
+  }catch(err){wrap.innerHTML=`<p style="color:red">${esc(err.message)}</p>`;}
 }
 
 async function submitNilaiA(e,username,judul,setBy){
@@ -1253,7 +1268,7 @@ async function loadAdminNilai(){
       <div class="ff">
         <label>Kelompok</label>
         <select id="ad-grp-sel" onchange="adGrpChange(this)">
-        <option value="">Pilih kelompok</option>${kelompoks.map(g=>`<option value="${g}">Kelompok ${g}</option>`).join('')}
+        <option value="">Pilih kelompok</option>${kelompoks.map(g=>`<option value="${esc(g)}">Kelompok ${esc(g)}</option>`).join('')}
         </select>
       </div>
       <div class="ff">
@@ -1264,13 +1279,13 @@ async function loadAdminNilai(){
       </div>
     </div>
     <div id="ad-grade-wrap"></div>`);
-  }catch(e){setContent(`<p style="color:red">${e.message}</p>`);}
+  }catch(e){setContent(`<p style="color:red">${esc(e.message)}</p>`);}
 }
 function adGrpChange(sel){
   const stu=document.getElementById('ad-stu-sel');document.getElementById('ad-grade-wrap').innerHTML='';
   if(!sel.value){stu.disabled=true;stu.innerHTML='<option>Pilih kelompok dahulu</option>';return;}
   const list=(window._adUsers||[]).filter(u=>u.role==='praktikan'&&+u.kelompok===+sel.value);
-  stu.disabled=false;stu.innerHTML='<option value="">Pilih praktikan</option>'+list.map(u=>`<option value="${u.username}">${u.name}</option>`).join('');
+  stu.disabled=false;stu.innerHTML='<option value="">Pilih praktikan</option>'+list.map(u=>`<option value="${esc(u.username)}">${esc(u.name)}</option>`).join('');
 }
 async function adStuChange(sel){
   const wrap=document.getElementById('ad-grade-wrap');if(!sel.value){wrap.innerHTML='';return;}
@@ -1283,12 +1298,12 @@ async function adStuChange(sel){
       <table>
       <thead><tr><th>Judul</th>${KOMP.map(k=>`<th>${k.label}<br><small style="font-weight:400;color:var(--muted)">${k.bobot}%</small></th>`).join('')}<th>Total</th></tr></thead>
       <tbody>${mods.map(m=>{const g=grades.find(x=>x.judul===m.id||x.judul===m.judul)||{};const total=g.nilaiAkhir||hitungTotal(g)||null;
-        return`<tr><td style="font-weight:500">${m.judul}</td>
+        return`<tr><td style="font-weight:500">${esc(m.judul)}</td>
           ${KOMP.map(k=>`<td>${g[k.key]!==undefined&&g[k.key]!==''?g[k.key]:'—'}</td>`).join('')}
           <td>${total?`<span class="score-chip ${scoreClass(total)}">${parseFloat(total).toFixed(2)}</span>`:'—'}</td>
         </tr>`;}).join('')}
       </tbody></table></div>`;
-  }catch(err){wrap.innerHTML=`<p style="color:red">${err.message}</p>`;}
+  }catch(err){wrap.innerHTML=`<p style="color:red">${esc(err.message)}</p>`;}
 }
 async function loadAdminPengguna(ses){
   setContent(loading());
@@ -1298,10 +1313,10 @@ async function loadAdminPengguna(ses){
     setContent(`
     <div class="phero">${av(ses,'av-lg')}
       <div style="flex:1">
-        <h2>${ses.name}</h2>
+        <h2>${esc(ses.name)}</h2>
         <p>Administrator Laboratorium</p>
       </div>
-      <button class="btn btn-white btn-sm" onclick='openEditModal(${JSON.stringify(ses).replace(/'/g,"&#39;")})'>Edit Profil</button>
+      <button class="btn btn-white btn-sm" onclick='openEditModal(${escAttr(JSON.stringify(ses))})'>Edit Profil</button>
     </div> 
     <div class="ph">
       <span class="ey">Administrasi</span>
@@ -1310,9 +1325,9 @@ async function loadAdminPengguna(ses){
       <span class="slabel">Asisten Lab (${aslabs.length})</span>
       <div class="g g3" style="margin-bottom:28px;">${aslabs.map(a=>{
         return`<div class="card">
-          <h3>${a.name}</h3>
-          <p>${Array.isArray(a.kode)&&a.kode.length?a.kode.join(', '):'—'}</p>
-          <span class="tag blue" style="margin-top:8px;">Kelompok ${Array.isArray(a.kelompok)?a.kelompok.join(', '):a.kelompok}</span>
+          <h3>${esc(a.name)}</h3>
+          <p>${Array.isArray(a.kode)&&a.kode.length?esc(a.kode.join(', ')):'—'}</p>
+          <span class="tag blue" style="margin-top:8px;">Kelompok ${Array.isArray(a.kelompok)?esc(a.kelompok.join(', ')):esc(a.kelompok)}</span>
           </div>`;}).join('')}
       </div>
       <span class="slabel">Praktikan (${prak.length})</span>
@@ -1327,14 +1342,14 @@ async function loadAdminPengguna(ses){
             </tr>
           </thead>
           <tbody>${prak.map(p=>`<tr>
-            <td>${p.name}</td>
-            <td>${p.nrp||'—'}</td>
-            <td>${p.kelompok}</td>
-            <td>${p.username}</td>
+            <td>${esc(p.name)}</td>
+            <td>${esc(p.nrp||'—')}</td>
+            <td>${esc(p.kelompok)}</td>
+            <td>${esc(p.username)}</td>
           </tr>`).join('')}</tbody>
         </table>
       </div>`);
-  }catch(e){setContent(`<p style="color:red">${e.message}</p>`);}
+  }catch(e){setContent(`<p style="color:red">${esc(e.message)}</p>`);}
 }
 
 let _pp=null;
@@ -1416,7 +1431,7 @@ function openEditModal(ses){
       window._mustChangePassword=false;
       closeModal();toast('Profil berhasil diperbarui.');renderApp();
     }
-    catch(ex){err.innerHTML=`<div class="merr">${ex.message}</div>`;btn.disabled=false;btn.innerHTML='Simpan Perubahan';}
+    catch(ex){err.innerHTML=`<div class="merr">${esc(ex.message)}</div>`;btn.disabled=false;btn.innerHTML='Simpan Perubahan';}
   };
 }
 
