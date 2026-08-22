@@ -5,6 +5,7 @@
 
 # Node
 node_modules/
+migration/package-lock.json
 
 # Password sementara hasil migrasi — SENSITIF, jangan pernah ter-commit.
 # Dihapus dari disk setelah dibagikan manual ke tiap pengguna.
