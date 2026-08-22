@@ -1,4 +1,3 @@
-
 'use strict';
 
 const KOMP = [
@@ -159,7 +158,7 @@ function openViewer(mod) {
           <div style="display:flex;gap:8px;align-items:center;">
             <span class="tag ${mod.fileType==='pdf'?'':'blue'}" style="font-size:11px;">${mod.fileType==='pdf'?'pdf':'Docs'}</span>
             <a href="${mod.fileUrl}" target="_blank" class="btn btn-ghost" style="color:#fff;height:32px;font-size:12px;">Buka tab baru ↗</a>
-            <button class="btn btn-ghost" style="color:#fff;height:32px;" onclick="closeViewer()">✕ Tutup</button>
+            <button class="btn btn-ghost" style="color:#fff;height:32px;" onclick="closeViewer()">✕</button>
           </div>
         </div>
         <div class="viewer-body">
@@ -184,7 +183,6 @@ async function loadLandingModules() {
         <div class="mod-card-land" onclick='openViewer(${JSON.stringify(m).replace(/'/g,"&#39;")})'>
           <span class="mod-num">${String(i+1).padStart(2,'0')}</span>
           <h3>${m.judul}</h3>
-          <p>${m.ringkas}</p>
           <span class="mod-type-badge ${m.fileType==='pdf'?'pdf':'docs'}">${m.fileType==='pdf'?'pdf':'Docs'}</span>
         </div>`).join('');
     try {
@@ -280,7 +278,7 @@ async function showApp(){
 window.addEventListener('hashchange',()=>{ if(getSession()) renderApp(); });
 
 const IC={
-  profil:`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="12" cy="8" r="4"/><path d="M4 21c1.5-4 5-6 8-6s6.5 2 8 6"/></svg>`,
+  profil: `<svg viewBox="0 0 24 24" fill="currentColor"><path d="M10.55 2.53a2 2 0 0 1 2.9 0l7.5 8A2 2 0 0 1 19.5 14H18v5a1 1 0 0 1-1 1h-3v-4h-4v4H7a1 1 0 0 1-1-1v-5H4.5a2 2 0 0 1-1.45-3.47l7.5-8z"/></svg>`,
   modul:`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M4 4h11a3 3 0 0 1 3 3v13H7a3 3 0 0 1-3-3V4z"/><path d="M4 4v14a3 3 0 0 0 3 3h11"/></svg>`,
   jadwal:`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M8 3v4M16 3v4M3 10h18"/></svg>`,
   nilai:`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M4 19V9M12 19V5M20 19v-7"/></svg>`,
@@ -470,7 +468,8 @@ async function loadJadwalP(ses){
     </div>
     <div class="g g3">
       ${rotasi.map(r=>{
-          const s = schedules.find(x => x.judul === r.id && +x.kelompokId === +ses.kelompok);        return`<div class="card" style="display:flex;flex-direction:column;gap:12px;padding:20px;">
+          const s = schedules.find(x => (x.judul === r.judul || x.judul === r.judulPanjang) && +x.kelompokId === +ses.kelompok);        
+          return`<div class="card" style="display:flex;flex-direction:column;gap:12px;padding:20px;">
           <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:8px;">
             <div style="background:var(--blue);color:#fff;border-radius:10px;padding:6px 10px;
               font-size:12px;font-weight:700;letter-spacing:.03em;flex-shrink:0;">
