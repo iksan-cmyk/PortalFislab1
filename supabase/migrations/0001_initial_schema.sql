@@ -106,8 +106,8 @@ FROM public.rotasi r
 JOIN public.modules m ON m.id = r.module_id
 GROUP BY r.aslab_username;
 
--- current_role(): role user yang sedang login (SECURITY DEFINER -> bypass RLS).
-CREATE OR REPLACE FUNCTION public.current_role() RETURNS text
+-- app_current_role(): role user yang sedang login (SECURITY DEFINER -> bypass RLS).
+CREATE OR REPLACE FUNCTION public.app_current_role() RETURNS text
 LANGUAGE sql SECURITY DEFINER STABLE AS $$
   SELECT role FROM public.profiles WHERE id = auth.uid();
 $$;
@@ -198,19 +198,19 @@ CREATE POLICY rotasi_read ON public.rotasi
 -- praktikan: SELECT jadwal untuk kelompok sendiri.
 CREATE POLICY sched_p_select ON public.schedules
   FOR SELECT TO authenticated
-  USING (current_role() = 'praktikan'
+  USING (app_current_role() = 'praktikan'
          AND kelompok = (SELECT kelompok FROM public.profiles WHERE id = auth.uid()));
 
 -- aslab: ALL untuk modul yang dipegang (cek lewat rotasi).
 CREATE POLICY sched_aslab_all ON public.schedules
   FOR ALL TO authenticated
-  USING (current_role() = 'aslab'
+  USING (app_current_role() = 'aslab'
          AND EXISTS (
            SELECT 1 FROM public.rotasi r
            WHERE r.module_id = schedules.module_id
              AND r.aslab_username = public.current_username()
          ))
-  WITH CHECK (current_role() = 'aslab'
+  WITH CHECK (app_current_role() = 'aslab'
               AND EXISTS (
                 SELECT 1 FROM public.rotasi r
                 WHERE r.module_id = schedules.module_id
@@ -220,8 +220,8 @@ CREATE POLICY sched_aslab_all ON public.schedules
 -- admin: ALL semua jadwal.
 CREATE POLICY sched_admin_all ON public.schedules
   FOR ALL TO authenticated
-  USING (current_role() = 'admin')
-  WITH CHECK (current_role() = 'admin');
+  USING (app_current_role() = 'admin')
+  WITH CHECK (app_current_role() = 'admin');
 
 -- -----------------------------------------------------------------------------
 -- grades
@@ -229,19 +229,19 @@ CREATE POLICY sched_admin_all ON public.schedules
 -- praktikan: SELECT baris milik sendiri saja.
 CREATE POLICY grades_p_select ON public.grades
   FOR SELECT TO authenticated
-  USING (current_role() = 'praktikan'
+  USING (app_current_role() = 'praktikan'
          AND username = public.current_username());
 
 -- aslab: ALL untuk modul yang dipegang (cek lewat rotasi).
 CREATE POLICY grades_aslab_all ON public.grades
   FOR ALL TO authenticated
-  USING (current_role() = 'aslab'
+  USING (app_current_role() = 'aslab'
          AND EXISTS (
            SELECT 1 FROM public.rotasi r
            WHERE r.module_id = grades.module_id
              AND r.aslab_username = public.current_username()
          ))
-  WITH CHECK (current_role() = 'aslab'
+  WITH CHECK (app_current_role() = 'aslab'
               AND EXISTS (
                 SELECT 1 FROM public.rotasi r
                 WHERE r.module_id = grades.module_id
@@ -251,7 +251,7 @@ CREATE POLICY grades_aslab_all ON public.grades
 -- admin: SELECT semua grades (rekap nilai), tidak boleh menulis.
 CREATE POLICY grades_admin_select ON public.grades
   FOR SELECT TO authenticated
-  USING (current_role() = 'admin');
+  USING (app_current_role() = 'admin');
 
 -- -----------------------------------------------------------------------------
 -- profiles
@@ -264,17 +264,17 @@ CREATE POLICY prof_self_select ON public.profiles
 -- praktikan: SELECT semua aslab (untuk halaman Kontak).
 CREATE POLICY prof_p_select_aslab ON public.profiles
   FOR SELECT TO authenticated
-  USING (current_role() = 'praktikan' AND role = 'aslab');
+  USING (app_current_role() = 'praktikan' AND role = 'aslab');
 
 -- aslab: SELECT semua praktikan (penyesuaian #3 — tetap broad, bare minimum).
 CREATE POLICY prof_a_select_p ON public.profiles
   FOR SELECT TO authenticated
-  USING (current_role() = 'aslab' AND role = 'praktikan');
+  USING (app_current_role() = 'aslab' AND role = 'praktikan');
 
 -- admin: SELECT semua profiles.
 CREATE POLICY prof_admin_select ON public.profiles
   FOR SELECT TO authenticated
-  USING (current_role() = 'admin');
+  USING (app_current_role() = 'admin');
 
 -- semua role: UPDATE baris sendiri (ganti foto/password sendiri).
 CREATE POLICY prof_self_update ON public.profiles
@@ -285,8 +285,8 @@ CREATE POLICY prof_self_update ON public.profiles
 -- admin: UPDATE semua profiles (penyesuaian #2 — kelola daftar pengguna).
 CREATE POLICY prof_admin_update ON public.profiles
   FOR UPDATE TO authenticated
-  USING (current_role() = 'admin')
-  WITH CHECK (current_role() = 'admin');
+  USING (app_current_role() = 'admin')
+  WITH CHECK (app_current_role() = 'admin');
 
 -- =============================================================================
 -- STORAGE — bucket avatars
@@ -312,3 +312,51 @@ CREATE POLICY avatars_update ON storage.objects
          AND (storage.foldername(name))[1] = auth.uid()::text)
   WITH CHECK (bucket_id = 'avatars'
               AND (storage.foldername(name))[1] = auth.uid()::text);
+
+-- =============================================================================
+-- GRANT EKSPLISIT
+-- RLS policy hanya memfilter baris; tanpa GRANT pada tabel, role tidak bisa
+-- menyentuh tabel sama sekali. Grant di bawah adalah union hak akses dari semua
+-- policy per tabel. Insert/Delete pada profiles tidak diberikan ke client
+-- (pembuatan akun lewat Edge Function + service_role yang bypass RLS).
+-- =============================================================================
+
+-- Skema public harus bisa dipakai oleh kedua role client.
+GRANT USAGE ON SCHEMA public TO anon, authenticated;
+
+-- modules: anon SELECT (landing tanpa login), authenticated SELECT.
+GRANT SELECT ON public.modules TO anon, authenticated;
+
+-- rotasi: authenticated SELECT saja (policy rotasi_read TO authenticated).
+GRANT SELECT ON public.rotasi TO authenticated;
+
+-- schedules: authenticated butuh ALL (policy aslab & admin FOR ALL).
+GRANT SELECT, INSERT, UPDATE, DELETE ON public.schedules TO authenticated;
+
+-- grades: authenticated butuh ALL (policy aslab FOR ALL termasuk DELETE).
+GRANT SELECT, INSERT, UPDATE, DELETE ON public.grades TO authenticated;
+
+-- profiles: authenticated butuh SELECT & UPDATE saja.
+-- (INSERT profile dilakukan trigger handle_new_user sebagai SECURITY DEFINER
+--  pemilik tabel; DELETE akun dilakukan admin via service_role.)
+GRANT SELECT, UPDATE ON public.profiles TO authenticated;
+
+-- Sequence untuk serial PK, dipakai otomatis saat INSERT schedules/grades/rotasi.
+GRANT USAGE, SELECT ON SEQUENCE public.rotasi_id_seq    TO authenticated;
+GRANT USAGE, SELECT ON SEQUENCE public.schedules_id_seq TO authenticated;
+GRANT USAGE, SELECT ON SEQUENCE public.grades_id_seq    TO authenticated;
+
+-- Fungsi helper.
+-- public_aslab_count: dipanggil anon di landing (stat aslab) + authenticated.
+-- app_current_role / current_username: dipanggil authenticated di dalam policy.
+-- Trigger functions (handle_new_user, recompute_nilai_akhir) dijalankan oleh
+-- pemilik tabel saat trigger fire — tidak butuh grant ke role client.
+GRANT EXECUTE ON FUNCTION public.public_aslab_count() TO anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.app_current_role()       TO authenticated;
+GRANT EXECUTE ON FUNCTION public.current_username()   TO authenticated;
+
+-- Storage schema & tabel objects (bucket avatars).
+-- anon SELECT (foto avatar tampil tanpa login); authenticated SELECT/INSERT/UPDATE.
+GRANT USAGE ON SCHEMA storage          TO anon, authenticated;
+GRANT SELECT                          ON storage.objects TO anon;
+GRANT SELECT, INSERT, UPDATE          ON storage.objects TO authenticated;
