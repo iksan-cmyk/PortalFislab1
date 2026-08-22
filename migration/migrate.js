@@ -332,10 +332,46 @@ async function main() {
   await migrateSchedules();
   await migrateGrades();
 
+  await verifyConsistency();
+
   console.log('\n=== SELESAI ===');
   if (existsSync(TEMP_PW_PATH)) {
     console.log(`Password sementara: ${TEMP_PW_PATH}`);
     console.log('BAGIKAN ke tiap pengguna, lalu HAPUS file ini dari disk.');
+  }
+}
+
+// Cek konsistensi: akun dengan must_change_password=true di profiles
+// harus punya baris di temp_passwords.csv. Kalau tidak, password sementara
+// hilang (mis: createUser timeout seperti kasus 5001251036).
+async function verifyConsistency() {
+  console.log('\n=== KONSISTENSI ===');
+  const { data, error } = await sb.from('profiles')
+    .select('username,name')
+    .eq('must_change_password', true);
+  if (error) { console.warn(`  WARNING: gagal query profiles untuk konsistensi: ${error.message}`); return; }
+  const mustChange = new Set((data || []).map(r => r.username));
+
+  const tempUsernames = new Set();
+  if (existsSync(TEMP_PW_PATH)) {
+    const lines = readFileSync(TEMP_PW_PATH, 'utf8').split('\n');
+    // skip header (baris pertama) dan baris kosong
+    for (let i = 1; i < lines.length; i++) {
+      const u = (lines[i].split(',', 1)[0] || '').trim();
+      if (u) tempUsernames.add(u);
+    }
+  }
+
+  const orphans = [...mustChange].filter(u => !tempUsernames.has(u));
+  if (orphans.length === 0) {
+    console.log(`  OK: ${mustChange.size} akun must_change_password, semua tercatat di temp_passwords.csv.`);
+  } else {
+    console.warn(`  WARNING: ${orphans.length} akun must_change_password TIDAK punya baris di temp_passwords.csv:`);
+    for (const u of orphans) {
+      const p = (data || []).find(r => r.username === u);
+      console.warn(`    - ${u} (${p ? p.name : '?'}) — password sementara hilang, perlu reset manual`);
+    }
+    console.warn('  Jalankan fix-orphan-user.js (atau reset manual di Dashboard) untuk akun-akun ini.');
   }
 }
 
