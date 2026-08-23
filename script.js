@@ -29,18 +29,338 @@ function scoreClass(v) {
   return 'd';
 }
 
-/*API*/
+/*API — semua action lewat Supabase (supabase-js). Tidak ada lagi fetch ke Google Apps Script.*/
 async function api(action, body={}, useCache=false) {
   const cacheKey = action + JSON.stringify(body);
   if (useCache) {
     const cached = cacheGet(cacheKey);
     if (cached) return cached;
   }
-  const res = await fetch(API_URL, { method:'POST', body: JSON.stringify({ action, ...body }) });
-  const data = await res.json();
-  if (data.error) throw new Error(data.error);
+  let data;
+  switch (action) {
+    case 'login':         data = await apiLogin(body); break;
+    case 'updateProfile': data = await apiUpdateProfile(body); break;
+    case 'getModules':    data = await apiGetModules(); break;
+    case 'getUsers':      data = await apiGetUsers(); break;
+    case 'getGrades':     data = await apiGetGrades(body); break;
+    case 'getSchedules':  data = await apiGetSchedules(body); break;
+    case 'getRotasi':     data = await apiGetRotasi(body); break;
+    case 'setSchedule':   data = await apiSetSchedule(body); break;
+    case 'setGrade':      data = await apiSetGrade(body); break;
+    default: throw new Error('Unknown action: ' + action);
+  }
   if (useCache) cacheSet(cacheKey, data);
   return data;
+}
+
+/* — Supabase auth: login berbasis username, email sintetis {username}@portalfislab.local — */
+async function apiLogin(body) {
+  const username = (body.username || '').trim().toLowerCase();
+  if (!username) throw new Error('Username wajib diisi.');
+  const email = `${username}@portalfislab.local`;
+  const { data, error } = await SB.auth.signInWithPassword({ email, password: body.password });
+  if (error) throw new Error(error.message);
+  const uid = data.user.id;
+  const { data: prof, error: pe } = await SB.from('profiles')
+    .select('username,name,role,nrp,kelompok,wa,photo_path,must_change_password')
+    .eq('id', uid).single();
+  if (pe || !prof) throw new Error('Profil tidak ditemukan untuk user ini.');
+  const user = {
+    username: prof.username,
+    name:     prof.name,
+    role:     prof.role,
+    nrp:      prof.nrp || undefined,
+    kelompok: prof.kelompok,
+    wa:       prof.wa || undefined,
+    photo:    prof.photo_path ? SB.storage.from('avatars').getPublicUrl(prof.photo_path).data.publicUrl : undefined,
+    must_change_password: prof.must_change_password,
+  };
+  if (prof.role === 'aslab') {
+    const { data: meta } = await SB.from('v_aslab_meta')
+      .select('kode_arr,kelompok_arr')
+      .eq('username', prof.username).single();
+    user.kode     = (meta && meta.kode_arr)     || [];
+    user.kelompok = (meta && meta.kelompok_arr) || [];
+  }
+  return { user };
+}
+
+/* — Supabase auth: ganti password + upload foto ke Storage — */
+async function apiUpdateProfile(body) {
+  const ses = getSession();
+  if (!ses) throw new Error('Sesi tidak ditemukan.');
+  const { data: uData } = await SB.auth.getUser();
+  const uid = uData.user.id;
+
+  // 1. Ganti password (jika diminta)
+  if (body.newPassword) {
+    // verifikasi password lama dengan re-auth
+    if (body.oldPassword) {
+      const email = `${ses.username}@portalfislab.local`;
+      const { error: reErr } = await SB.auth.signInWithPassword({ email, password: body.oldPassword });
+      if (reErr) throw new Error('Password saat ini salah.');
+    }
+    const { error: pwErr } = await SB.auth.updateUser({ password: body.newPassword });
+    if (pwErr) throw new Error(pwErr.message);
+  }
+
+  // 2. Upload foto (jika ada) ke Storage bucket avatars, folder {uid}/
+  let photoPath = undefined;
+  if (body.photo) {
+    const blob = dataURLtoBlob(body.photo);
+    if (blob.size > 2 * 1024 * 1024) throw new Error('Ukuran foto maks. 2MB.');
+    if (!blob.type.startsWith('image/')) throw new Error('File harus berupa gambar.');
+    const ext = (blob.type.split('/')[1] || 'png').replace('jpeg', 'jpg');
+    photoPath = `${uid}/avatar.${ext}`;
+    const { error: upErr } = await SB.storage.from('avatars')
+      .upload(photoPath, blob, { upsert: true, contentType: blob.type });
+    if (upErr) throw new Error('Gagal upload foto: ' + upErr.message);
+  }
+
+  // 3. Update profiles (photo_path + reset must_change_password)
+  const updates = {};
+  if (photoPath) updates.photo_path = photoPath;
+  if (body.newPassword) updates.must_change_password = false;
+  if (Object.keys(updates).length > 0) {
+    const { error: upErr } = await SB.from('profiles').update(updates).eq('id', uid);
+    if (upErr) throw new Error('Gagal update profil: ' + upErr.message);
+  }
+
+  const newPhoto = photoPath ? SB.storage.from('avatars').getPublicUrl(photoPath).data.publicUrl : ses.photo;
+  return { user: { ...ses, photo: newPhoto, must_change_password: false } };
+}
+
+/* — helper: konversi data URL (base64) ke Blob untuk upload Storage — */
+function dataURLtoBlob(dataURL) {
+  const [meta, b64] = dataURL.split(',');
+  const mime = (meta.match(/:(.*?);/) || ['', 'image/png'])[1];
+  const bin = atob(b64);
+  const arr = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
+  return new Blob([arr], { type: mime });
+}
+
+/* — helper: cache map judul -> module id (dipakai getGrades/getSchedules/setSchedule/setGrade) — */
+let _judulToId = null;
+async function getModuleIdByJudul(judul) {
+  if (!_judulToId) {
+    const { data, error } = await SB.from('modules').select('id,judul');
+    if (error) throw new Error(error.message);
+    _judulToId = new Map();
+    for (const m of data) _judulToId.set(m.judul, m.id);
+  }
+  const id = _judulToId.get(judul);
+  if (!id) throw new Error('Modul tidak ditemukan: ' + judul);
+  return id;
+}
+
+/* — getModules: SELECT dari modules, public (anon bisa baca) — */
+async function apiGetModules() {
+  const { data, error } = await SB.from('modules')
+    .select('id,kode,judul,ringkas,file_url,file_type')
+    .order('id');
+  if (error) throw new Error(error.message);
+  return { modules: (data || []).map(m => ({
+    id: m.id,
+    kode: m.kode,
+    judul: m.judul,
+    ringkas: m.ringkas,
+    fileUrl: m.file_url,
+    fileType: m.file_type,
+  }))};
+}
+
+/* — getUsers: response disesuaikan per role (RLS sudah filter baris) — */
+async function apiGetUsers() {
+  const ses = getSession();
+  if (!ses) {
+    // anon (landing): hanya butuh jumlah aslab untuk stat
+    const { data: count, error } = await SB.rpc('public_aslab_count');
+    if (error) throw new Error(error.message);
+    return { users: Array(count).fill({ role: 'aslab' }) };
+  }
+  // fetch aslab metadata (kode & kelompok array) untuk merge
+  const { data: aslabMeta } = await SB.from('v_aslab_meta')
+    .select('username,kode_arr,kelompok_arr');
+  const metaMap = new Map();
+  for (const m of (aslabMeta || [])) metaMap.set(m.username, m);
+
+  let profiles = [];
+  const cols = 'username,name,role,nrp,kelompok,wa,photo_path';
+  if (ses.role === 'admin') {
+    const { data, error } = await SB.from('profiles').select(cols);
+    if (error) throw new Error(error.message);
+    profiles = data;
+  } else if (ses.role === 'aslab') {
+    const { data: prak, error: e1 } = await SB.from('profiles').select(cols).eq('role', 'praktikan');
+    if (e1) throw new Error(e1.message);
+    const { data: self, error: e2 } = await SB.from('profiles').select(cols).eq('username', ses.username);
+    if (e2) throw new Error(e2.message);
+    profiles = [...(prak || []), ...(self || [])];
+  } else {
+    const { data: aslabs, error: e1 } = await SB.from('profiles').select(cols).eq('role', 'aslab');
+    if (e1) throw new Error(e1.message);
+    const { data: self, error: e2 } = await SB.from('profiles').select(cols).eq('username', ses.username);
+    if (e2) throw new Error(e2.message);
+    profiles = [...(aslabs || []), ...(self || [])];
+  }
+  const users = profiles.map(p => {
+    const u = {
+      username: p.username,
+      name: p.name,
+      role: p.role,
+      nrp: p.nrp || undefined,
+      kelompok: p.kelompok,
+      wa: p.wa || undefined,
+      photo: p.photo_path ? SB.storage.from('avatars').getPublicUrl(p.photo_path).data.publicUrl : undefined,
+    };
+    if (p.role === 'aslab') {
+      const meta = metaMap.get(p.username);
+      u.kode = (meta && meta.kode_arr) || [];
+      u.kelompok = (meta && meta.kelompok_arr) || [];
+    }
+    return u;
+  });
+  return { users };
+}
+
+/* — getGrades: body {username?} dan/atau {judul?} (judul = full module title) — */
+async function apiGetGrades(body) {
+  let query = SB.from('grades').select(`
+    username, module_id, set_by, updated_at, nilai_akhir,
+    prelab, inlab, abstrak, pendahuluan, metodologi, analisis, pembahasan, kesimpulan, format, plagiasi,
+    cat_prelab, cat_inlab, cat_abstrak, cat_pendahuluan, cat_metodologi, cat_analisis, cat_pembahasan, cat_kesimpulan, cat_format, cat_plagiasi,
+    modules:module_id(judul)
+  `);
+  if (body.username) query = query.eq('username', body.username);
+  if (body.judul) {
+    const modId = await getModuleIdByJudul(body.judul);
+    query = query.eq('module_id', modId);
+  }
+  const { data, error } = await query;
+  if (error) throw new Error(error.message);
+  return { grades: (data || []).map(g => ({
+    judul: (g.modules && g.modules.judul) || g.module_id,
+    username: g.username,
+    nilaiAkhir: g.nilai_akhir !== null ? String(g.nilai_akhir) : '',
+    setBy: g.set_by,
+    updatedAt: g.updated_at,
+    prelab: g.prelab ?? '', inlab: g.inlab ?? '', abstrak: g.abstrak ?? '',
+    pendahuluan: g.pendahuluan ?? '', metodologi: g.metodologi ?? '',
+    analisis: g.analisis ?? '', pembahasan: g.pembahasan ?? '',
+    kesimpulan: g.kesimpulan ?? '', format: g.format ?? '', plagiasi: g.plagiasi ?? '',
+    catPrelab: g.cat_prelab || '', catInlab: g.cat_inlab || '',
+    catAbstrak: g.cat_abstrak || '', catPendahuluan: g.cat_pendahuluan || '',
+    catMetodologi: g.cat_metodologi || '', catAnalisis: g.cat_analisis || '',
+    catPembahasan: g.cat_pembahasan || '', catKesimpulan: g.cat_kesimpulan || '',
+    catFormat: g.cat_format || '', catPlagiasi: g.cat_plagiasi || '',
+  }))};
+}
+
+/* — getSchedules: body {kelompok?} dan/atau {judul?} (judul = full module title) — */
+async function apiGetSchedules(body) {
+  let query = SB.from('schedules')
+    .select('module_id, kelompok, tanggal, sesi, set_by, updated_at, modules:module_id(judul)');
+  if (body.kelompok) query = query.eq('kelompok', parseInt(body.kelompok));
+  if (body.judul) {
+    const modId = await getModuleIdByJudul(body.judul);
+    query = query.eq('module_id', modId);
+  }
+  const { data, error } = await query;
+  if (error) throw new Error(error.message);
+  return { schedules: (data || []).map(s => ({
+    judul: (s.modules && s.modules.judul) || s.module_id,
+    kelompokId: s.kelompok,
+    tanggal: s.tanggal,
+    sesi: s.sesi,
+    setBy: s.set_by,
+    updatedAt: s.updated_at,
+  }))};
+}
+
+/* — getRotasi: body {kelompok?} atau {kode:'E1,E2'} — */
+async function apiGetRotasi(body) {
+  let query = SB.from('rotasi')
+    .select('kelompok, minggu, aslab_username, modules:module_id(id, kode, judul)');
+  if (body.kelompok) query = query.eq('kelompok', parseInt(body.kelompok));
+  if (body.kode) {
+    const kodeList = body.kode.split(',').map(k => k.trim()).filter(Boolean);
+    const { data: mods, error: me } = await SB.from('modules').select('id').in('kode', kodeList);
+    if (me) throw new Error(me.message);
+    const modIds = (mods || []).map(m => m.id);
+    if (modIds.length === 0) return { rotasi: [] };
+    query = query.in('module_id', modIds);
+  }
+  const { data, error } = await query;
+  if (error) throw new Error(error.message);
+  // fetch aslab names untuk aslab_username -> name
+  const aslabUsernames = [...new Set((data || []).map(r => r.aslab_username).filter(Boolean))];
+  let nameMap = new Map();
+  if (aslabUsernames.length > 0) {
+    const { data: aslabs } = await SB.from('profiles').select('username,name').in('username', aslabUsernames);
+    for (const a of (aslabs || [])) nameMap.set(a.username, a.name);
+  }
+  return { rotasi: (data || []).map(r => ({
+    kode: (r.modules && r.modules.kode) || '',
+    judul: (r.modules && r.modules.id) || '',
+    judulPanjang: (r.modules && r.modules.judul) || '',
+    kelompok: r.kelompok,
+    minggu: r.minggu,
+    aslab: r.aslab_username ? (nameMap.get(r.aslab_username) || null) : null,
+  }))};
+}
+
+/* — setSchedule: body {kelompokId, judul, tanggal, sesi, setBy}. tanggal kosong = delete. — */
+async function apiSetSchedule(body) {
+  const moduleId = await getModuleIdByJudul(body.judul);
+  const kelompok = parseInt(body.kelompokId);
+  if (!body.tanggal) {
+    const { error } = await SB.from('schedules')
+      .delete().eq('module_id', moduleId).eq('kelompok', kelompok);
+    if (error) throw new Error(error.message);
+    return { success: true };
+  }
+  const { error } = await SB.from('schedules')
+    .upsert({
+      module_id: moduleId,
+      kelompok,
+      tanggal: body.tanggal,
+      sesi: body.sesi,
+      set_by: body.setBy,
+      updated_at: new Date().toISOString(),
+    }, { onConflict: 'module_id,kelompok' });
+  if (error) throw new Error(error.message);
+  return { success: true };
+}
+
+/* — setGrade: body {username, judul, setBy, 10 komponen, 10 catatan, nilaiAkhir(ignored)}.
+   nilai_akhir dihitung ulang oleh trigger recompute_nilai_akhir di server. — */
+async function apiSetGrade(body) {
+  const moduleId = await getModuleIdByJudul(body.judul);
+  const rec = {
+    username: body.username,
+    module_id: moduleId,
+    set_by: body.setBy,
+    updated_at: new Date().toISOString(),
+  };
+  const KOMP = ['prelab','inlab','abstrak','pendahuluan','metodologi','analisis','pembahasan','kesimpulan','format','plagiasi'];
+  const CAT = [
+    ['catPrelab','cat_prelab'], ['catInlab','cat_inlab'], ['catAbstrak','cat_abstrak'],
+    ['catPendahuluan','cat_pendahuluan'], ['catMetodologi','cat_metodologi'],
+    ['catAnalisis','cat_analisis'], ['catPembahasan','cat_pembahasan'],
+    ['catKesimpulan','cat_kesimpulan'], ['catFormat','cat_format'], ['catPlagiasi','cat_plagiasi'],
+  ];
+  for (const k of KOMP) {
+    if (body[k] !== undefined && body[k] !== '') rec[k] = parseFloat(body[k]);
+  }
+  for (const [camel, snake] of CAT) {
+    if (body[camel] !== undefined) rec[snake] = body[camel] || null;
+  }
+  // nilaiAkhir sengaja TIDAK dikirim — trigger recompute_nilai_akhir menghitung ulang di server
+  const { error } = await SB.from('grades')
+    .upsert(rec, { onConflict: 'username,module_id' });
+  if (error) throw new Error(error.message);
+  return { success: true };
 }
 
 /*session*/
@@ -68,10 +388,25 @@ function cacheGet(key) {
 }
 
 /*helpers*/
-const initials = n => n.split(' ').map(w=>w[0]).slice(0,2).join('').toUpperCase();
+function esc(s) {
+  if (s === null || s === undefined) return '';
+  return String(s)
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+    .replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+}
+// escAttr: untuk nilai di dalam onclick="fn('...')" — HTML entity tidak cukup
+// karena browser decode entity sebelum JS jalan. Butuh JS-string escape + HTML escape.
+function escAttr(s) {
+  if (s === null || s === undefined) return '';
+  return String(s)
+    .replace(/\\/g,'\\\\').replace(/'/g,"\\'")
+    .replace(/&/g,'&amp;').replace(/"/g,'&quot;')
+    .replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+const initials = n => esc(n).split(' ').map(w=>w[0]).slice(0,2).join('').toUpperCase();
 function av(user, extra='') {
   const cls='av'+(extra?' '+extra:'');
-  if(user.photo) return `<div class="${cls}"><img src="${user.photo}" alt="${user.name}"></div>`;
+  if(user.photo) return `<div class="${cls}"><img src="${user.photo}" alt="${esc(user.name)}"></div>`;
   return `<div class="${cls}">${initials(user.name)}</div>`;
 }
 function toast(msg) {
@@ -154,10 +489,10 @@ function openViewer(mod) {
     <div class="viewer-back" id="vback">
       <div class="viewer-box">
         <div class="viewer-head">
-          <h3>${mod.judul}</h3>
+          <h3>${esc(mod.judul)}</h3>
           <div style="display:flex;gap:8px;align-items:center;">
             <span class="tag ${mod.fileType==='pdf'?'':'blue'}" style="font-size:11px;">${mod.fileType==='pdf'?'pdf':'Docs'}</span>
-            <a href="${mod.fileUrl}" target="_blank" class="btn btn-ghost" style="color:#fff;height:32px;font-size:12px;">Buka tab baru ↗</a>
+            <a href="${esc(mod.fileUrl)}" target="_blank" class="btn btn-ghost" style="color:#fff;height:32px;font-size:12px;">Buka tab baru ↗</a>
             <button class="btn btn-ghost" style="color:#fff;height:32px;" onclick="closeViewer()">✕</button>
           </div>
         </div>
@@ -165,7 +500,7 @@ function openViewer(mod) {
           <div class="viewer-loading" id="vload"><div class="spinner"></div>Memuat…</div>
           <iframe src="${src}" style="display:none;"
             onload="document.getElementById('vload').style.display='none';this.style.display='block';"
-            allow="fullscreen" title="${mod.judul}"></iframe>
+            allow="fullscreen" title="${esc(mod.judul)}"></iframe>
         </div>
       </div>
     </div>`;
@@ -180,9 +515,9 @@ async function loadLandingModules() {
     const mods = await getMods();
     document.getElementById('mod-grid').innerHTML =
       mods.map((m,i)=>`
-        <div class="mod-card-land" onclick='openViewer(${JSON.stringify(m).replace(/'/g,"&#39;")})'>
+        <div class="mod-card-land" onclick='openViewer(${escAttr(JSON.stringify(m))})'>
           <span class="mod-num">${String(i+1).padStart(2,'0')}</span>
-          <h3>${m.judul}</h3>
+          <h3>${esc(m.judul)}</h3>
           <span class="mod-type-badge ${m.fileType==='pdf'?'pdf':'docs'}">${m.fileType==='pdf'?'pdf':'Docs'}</span>
         </div>`).join('');
     try {
@@ -190,7 +525,7 @@ async function loadLandingModules() {
       document.getElementById('stat-aslab').textContent=users.filter(u=>u.role==='aslab').length;
     }catch(_){}
   } catch(e) {
-    document.getElementById('mod-grid').innerHTML=`<p style="color:#9497a8;font-size:13px;">Gagal: ${e.message}</p>`;
+    document.getElementById('mod-grid').innerHTML=`<p style="color:#9497a8;font-size:13px;">Gagal: ${esc(e.message)}</p>`;
   }
 }
 
@@ -216,7 +551,7 @@ function initLoginPanel() {
       console.log("LOGIN RESPONSE", user);
       setSession(user); closePanel(); showApp();
     } catch(err) {
-      errEl.innerHTML=`<div class="login-err">${err.message}</div>`;
+      errEl.innerHTML=`<div class="login-err">${esc(err.message)}</div>`;
     } finally { btn.disabled=false; btn.innerHTML='Masuk'; }
   });
 }
@@ -250,6 +585,12 @@ async function showApp(){
   }
 
   renderApp();
+
+  // paksa ganti password sementara — modal tidak bisa ditutup sampai diganti (F4)
+  if (ses.must_change_password) {
+    window._mustChangePassword = true;
+    openEditModal(ses);
+  }
 
   try {
     if (ses.role === 'praktikan') {
@@ -295,11 +636,11 @@ function renderApp() {
   const sbAv   = document.getElementById('sb-av');
   if (sbName) sbName.textContent = ses.name;
   if (sbRole) sbRole.textContent = roleLabel(ses);
-  if (sbAv)   sbAv.innerHTML = ses.photo ? `<img src="${ses.photo}" alt="${ses.name}">` : initials(ses.name);
+  if (sbAv)   sbAv.innerHTML = ses.photo ? `<img src="${ses.photo}" alt="${esc(ses.name)}">` : initials(ses.name);
 
   // mobile actions
   const mobAv = document.getElementById('mob-av');
-  if (mobAv) mobAv.innerHTML = ses.photo ? `<img src="${ses.photo}" alt="${ses.name}">` : initials(ses.name);
+  if (mobAv) mobAv.innerHTML = ses.photo ? `<img src="${ses.photo}" alt="${esc(ses.name)}">` : initials(ses.name);
   const mobLogout = document.getElementById('btn-logout-mob');
   if (mobLogout) mobLogout.onclick = () => { clearSession(); CACHE={}; showLanding(); };
 
@@ -414,8 +755,8 @@ async function loadProfilP(ses){
     setContent(`<div class="phero">
       ${av(ses,'av-lg')}
       <div style="flex:1">
-        <h2>Selamat Datang, ${ses.name}</h2>
-        <p>NRP ${ses.nrp||'—'} · Kelompok ${ses.kelompok}</p>
+        <h2>Selamat Datang, ${esc(ses.name)}</h2>
+        <p>NRP ${esc(ses.nrp||'—')} · Kelompok ${esc(ses.kelompok)}</p>
       </div>
       </div>
       <div class="tw">
@@ -431,7 +772,7 @@ async function loadProfilP(ses){
             const s=schedules.find(x=>x.judul===m.id||x.judul===m.judul),g=grades.find(x=>x.judul===m.id||x.judul===m.judul);
             const na=g&&g.nilaiAkhir!==''?parseFloat(g.nilaiAkhir):null;
             return`<tr>
-              <td>${m.judul}</td>
+              <td>${esc(m.judul)}</td>
               <td>${s?fmtTgl(s.tanggal)+' · '+s.sesi:'<span class="tag">Belum dijadwalkan</span>'}</td>
               <td>${na!==null?`<span class="score-chip ${scoreClass(na)}">${na}</span>`:'<span class="tag">—</span>'}</td>
             </tr>`;
@@ -439,7 +780,7 @@ async function loadProfilP(ses){
           </tbody>
         </table>
         </div>`);
-  }catch(e){setContent(`<p style="color:red">${e.message}</p>`);}
+  }catch(e){setContent(`<p style="color:red">${esc(e.message)}</p>`);}
 }
 async function loadModulP(){
   setContent(loading('Memuat modul…'));
@@ -447,12 +788,12 @@ async function loadModulP(){
     const mods=await getMods();
     setContent(`<div class="ph"><span class="ey">Materi</span><h1>Modul Praktikum</h1></div>
       <div class="g g3">${mods.map((m,i)=>`
-        <div class="card card-click" onclick='openViewer(${JSON.stringify(m).replace(/'/g,"&#39;")})'>
+        <div class="card card-click" onclick='openViewer(${escAttr(JSON.stringify(m))})'>
           <span style="font-size:11px;color:var(--muted);display:block;margin-bottom:10px;">${String(i+1).padStart(2,'0')}</span>
-          <h3>${m.judul}</h3><p>${m.ringkas}</p>
+          <h3>${esc(m.judul)}</h3><p>${esc(m.ringkas)}</p>
           <span class="tag ${m.fileType==='pdf'?'':'blue'}" style="margin-top:10px;font-size:10px;">${m.fileType==='pdf'?'PDF':'Docs'}</span>
         </div>`).join('')}</div>`);
-  }catch(e){setContent(`<p style="color:red">${e.message}</p>`);}
+  }catch(e){setContent(`<p style="color:red">${esc(e.message)}</p>`);}
 }
 async function loadJadwalP(ses){
   setContent(loading());
@@ -464,7 +805,7 @@ async function loadJadwalP(ses){
     setContent(`
     <div class="ph">
       <span class="ey">Jadwal</span>
-      <h1>Jadwal Praktikum — Kelompok ${ses.kelompok}</h1>
+      <h1>Jadwal Praktikum — Kelompok ${esc(ses.kelompok)}</h1>
     </div>
     <div class="g g3">
       ${rotasi.map(r=>{
@@ -473,12 +814,12 @@ async function loadJadwalP(ses){
           <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:8px;">
             <div style="background:var(--blue);color:#fff;border-radius:10px;padding:6px 10px;
               font-size:12px;font-weight:700;letter-spacing:.03em;flex-shrink:0;">
-              ${r.kode||r.judul.slice(0,4).toUpperCase()}
+              ${esc(r.kode||r.judul.slice(0,4).toUpperCase())}
             </div>
             <span class="tag ${s?'green':''}" style="font-size:11px;">${s?'Terjadwal':'Belum'}</span>
           </div>
           <div>
-            <div style="font-size:15px;font-weight:600;color:var(--text);margin-bottom:2px;">${r.judulPanjang||r.judul}</div>
+            <div style="font-size:15px;font-weight:600;color:var(--text);margin-bottom:2px;">${esc(r.judulPanjang||r.judul)}</div>
             <div style="font-size:12px;color:var(--muted);">Minggu ke-${r.minggu||''}</div>
           </div>
           <div style="border-top:1px solid var(--border);padding-top:10px;display:flex;flex-direction:column;gap:6px;">
@@ -486,7 +827,7 @@ async function loadJadwalP(ses){
               <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                 <circle cx="12" cy="8" r="4"/><path d="M4 21c1.5-4 5-6 8-6s6.5 2 8 6"/>
               </svg>
-              ${r.aslab||'—'}
+              ${esc(r.aslab||'—')}
             </div>
             <div style="background:var(--off);border-left:3px solid ${s?'var(--blue)':'var(--border)'};
               padding:7px 10px;border-radius:0 8px 8px 0;font-size:13px;font-weight:500;color:var(--text);">
@@ -496,7 +837,7 @@ async function loadJadwalP(ses){
         </div>`;
       }).join('')}
     </div>`);
-  }catch(e){setContent(`<p style="color:red">${e.message}</p>`);}
+  }catch(e){setContent(`<p style="color:red">${esc(e.message)}</p>`);}
 }
 async function loadNilaiP(ses){
   setContent(loading());
@@ -510,7 +851,7 @@ async function loadNilaiP(ses){
           const hasCat=KOMP.some(k=>g[k.cat]);
           return`<div class="ncard" id="nc-${m.id}">
             <div class="ncard-head" onclick="toggleNcard('${m.id}')">
-              <span class="ncard-title">${m.judul}</span>
+              <span class="ncard-title">${esc(m.judul)}</span>
               <div class="ncard-meta">
                 ${hasCat?`<span class="tag amber" style="font-size:10px;">Ada catatan</span>`:''}
                 ${total?`<span class="ncard-total">${parseFloat(total).toFixed(2)}</span>`:'<span class="tag" style="font-size:11px;">Belum dinilai</span>'}
@@ -525,13 +866,13 @@ async function loadNilaiP(ses){
                   return`<div class="nrow">
                     <div class="nrow-label">${k.label}<span class="nrow-bobot">(${k.bobot}%)</span></div>
                     <div class="nrow-score${score===null?' na':''}">${score!==null?score:'—'}</div>
-                    ${cat?`<div class="nrow-cat">✎ ${cat}</div>`:`<div class="nrow-cat empty">Belum ada catatan</div>`}
+                    ${cat?`<div class="nrow-cat">✎ ${esc(cat)}</div>`:`<div class="nrow-cat empty">Belum ada catatan</div>`}
                   </div>`;}).join('')}
               </div>
             </div>
           </div>`;}).join('')}
       </div>`);
-  }catch(e){setContent(`<p style="color:red">${e.message}</p>`);}
+  }catch(e){setContent(`<p style="color:red">${esc(e.message)}</p>`);}
 }
 function toggleNcard(id){
   const el=document.getElementById('nc-'+id);
@@ -548,12 +889,9 @@ async function loadKontakP(ses){
       <div class="ph"><h1>Kontak Asisten Lab</h1></div>
       <div class="g g2">
         ${list.map(a=>{
-          const m=mods.find(x=>x.id===a.judul);
-          const judulLabel=m?m.judul:a.judul;
-          const kodeLabel=m?m.kode:'-';
           const waNum = a.wa ? a.wa.replace(/\D/g,'') : '';
           return`<div class="card" style="padding:0;overflow:hidden;border-radius:20px;cursor:pointer;"
-          onclick="openKontakPanel('${a.name}','${judulLabel}','${a.photo||''}','${initials(a.name)}','${waNum}')"            <!-- header gradient -->
+          onclick="openKontakPanel('${escAttr(a.name)}','${Array.isArray(a.kode)?escAttr(a.kode.join(', ')):''}','${a.photo||''}','${initials(a.name)}','${waNum}')"            <!-- header gradient -->
             <div style="height:110px;background:linear-gradient(135deg,#1B39B0,#8C4FEB,#FEA3DB);position:relative;">
               <div style="position:absolute;bottom:-28px;left:20px;
                 width:56px;height:56px;border-radius:50%;border:3px solid var(--surface);overflow:hidden;
@@ -565,14 +903,14 @@ async function loadKontakP(ses){
             <!-- content -->
             <div style="padding:38px 20px 20px;display:flex;align-items:flex-end;justify-content:space-between;gap:12px;flex-wrap:wrap;">
               <div>
-                <div style="font-size:15px;font-weight:600;color:var(--text);">${a.name}</div>
+                <div style="font-size:15px;font-weight:600;color:var(--text);">${esc(a.name)}</div>
                 <div style="font-size:12px;color:var(--muted);margin-top:2px;">Asisten Laboratorium</div>
               </div>
             </div>
           </div>`;
         }).join('')}
       </div>`);
-  }catch(e){setContent(`<p style="color:red">${e.message}</p>`);}
+  }catch(e){setContent(`<p style="color:red">${esc(e.message)}</p>`);}
 }
 function openKontakPanel(name, judul, photo, inits, waNum) {
   const ses = getSession();
@@ -594,15 +932,15 @@ function openKontakPanel(name, judul, photo, inits, waNum) {
       </div>
       <!-- body -->
       <div style="padding:44px 24px 24px;text-align:center;">
-        <div style="font-size:17px;font-weight:600;color:var(--text);margin-bottom:4px;">${name}</div>
+        <div style="font-size:17px;font-weight:600;color:var(--text);margin-bottom:4px;">${esc(name)}</div>
         <div style="font-size:12px;color:var(--muted);margin-bottom:24px;">Asisten Laboratorium</div>
         <!-- template tetap, hanya bagian isi yang diedit -->
         <div style="background:var(--off);border:1px solid var(--border);border-radius:14px;
           padding:14px;font-size:13px;color:var(--muted);text-align:left;margin-bottom:12px;line-height:1.7;">
-          Halo Kak <b style="color:var(--text);">${name}</b>, perkenalkan saya:<br>
-          Nama: <b style="color:var(--text);">${ses.name}</b><br>
-          NRP: <b style="color:var(--text);">${ses.nrp||'—'}</b><br>
-          Kelompok: <b style="color:var(--text);">${ses.kelompok}</b>
+          Halo Kak <b style="color:var(--text);">${esc(name)}</b>, perkenalkan saya:<br>
+          Nama: <b style="color:var(--text);">${esc(ses.name)}</b><br>
+          NRP: <b style="color:var(--text);">${esc(ses.nrp||'—')}</b><br>
+          Kelompok: <b style="color:var(--text);">${esc(ses.kelompok)}</b>
         </div>
         <textarea id="pesanTA" rows="3" style="width:100%;border:1px solid var(--border);border-radius:14px;
           padding:14px;font-size:13px;resize:none;
@@ -610,7 +948,7 @@ function openKontakPanel(name, judul, photo, inits, waNum) {
           placeholder="Tulis keperluanmu di sini…"></textarea>
         ${waNum
           ?`<a id="waLink" href="#"
-              onclick="event.preventDefault();kirimWA('${waNum}','${name}','${encodeURIComponent(ses.name)}','${ses.nrp||''}','${ses.kelompok}')"
+              onclick="event.preventDefault();kirimWA('${escAttr(waNum)}','${escAttr(name)}','${encodeURIComponent(ses.name)}','${escAttr(ses.nrp||'')}','${escAttr(String(ses.kelompok))}')"
               style="display:flex;align-items:center;justify-content:center;gap:8px;
                 width:100%;height:50px;margin-top:14px;border-radius:100px;
                 background:var(--blue);color:#fff;font-size:14px;font-weight:600;cursor:pointer;">
@@ -655,13 +993,13 @@ function renderAslab(hash,ses){const path=hash||'/a/jadwal';buildNav(NAV_A,path)
 }
 function loadProfilA(ses){
   console.log("SESSION", JSON.stringify(ses, null, 2));
-  setContent(`<div class="phero">${av(ses,'av-lg')}<div style="flex:1"><h2>${ses.name}</h2><p>Asisten Lab</p></div>
+  setContent(`<div class="phero">${av(ses,'av-lg')}<div style="flex:1"><h2>${esc(ses.name)}</h2><p>Asisten Lab</p></div>
     </div>
     <div class="g g2">
-      <div class="card"><h3>${Array.isArray(ses.kelompok)?ses.kelompok.length:0} Kelompok</h3><p>Kelompok ${Array.isArray(ses.kelompok)?ses.kelompok.join(', '):ses.kelompok}</p></div>
+      <div class="card"><h3>${Array.isArray(ses.kelompok)?ses.kelompok.length:0} Kelompok</h3><p>Kelompok ${Array.isArray(ses.kelompok)?esc(ses.kelompok.join(', ')):esc(ses.kelompok)}</p></div>
       <div class="card">
         <h3 style="font-size:15px;">
-          ${ses.kode}
+          ${esc(Array.isArray(ses.kode)?ses.kode.join(', '):ses.kode)}
         </h3>
         <p>Judul yang kamu pegang</p>
       </div>
@@ -692,21 +1030,21 @@ async function loadJadwalA(ses){
       <div style="margin-bottom:28px;">
         <div style="display:flex;align-items:center;gap:10px;margin-bottom:14px;">
           <span style="background:var(--blue);color:#fff;border-radius:8px;padding:4px 10px;
-            font-size:12px;font-weight:700;">${mod.kode}</span>
-          <span style="font-size:15px;font-weight:500;color:var(--text);">${mod.judul}</span>
+            font-size:12px;font-weight:700;">${esc(mod.kode)}</span>
+          <span style="font-size:15px;font-weight:500;color:var(--text);">${esc(mod.judul)}</span>
         </div>
         <div class="g g2">
           ${myRotasi.map(r=>{
             const s = schedules.find(x => x.judul===mod.judul && +x.kelompokId===+r.kelompok);
             return`<div class="card">
               <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;">
-                <h3>Kelompok ${r.kelompok}</h3>
-                <span class="tag" style="font-size:11px;">Minggu ke-${r.minggu}</span>
+                <h3>Kelompok ${esc(r.kelompok)}</h3>
+                <span class="tag" style="font-size:11px;">Minggu ke-${esc(r.minggu)}</span>
               </div>
               <p style="margin-bottom:14px;font-size:13px;color:var(--muted);">
-                ${s?'Terjadwal: '+fmtTgl(s.tanggal)+' · '+s.sesi:'Belum dijadwalkan'}
+                ${s?'Terjadwal: '+fmtTgl(s.tanggal)+' · '+esc(s.sesi):'Belum dijadwalkan'}
               </p>
-              <form onsubmit="submitJadwal(event,'${r.kelompok}','${mod.judul}','${ses.username}')">
+              <form onsubmit="submitJadwal(event,'${escAttr(r.kelompok)}','${escAttr(mod.judul)}','${escAttr(ses.username)}')">
                 <div class="fr">
                   <div class="ff"><label>Tanggal</label>
                     <input type="date" name="tanggal" value="${s?s.tanggal:''}" required></div>
@@ -717,7 +1055,7 @@ async function loadJadwalA(ses){
                 <div style="margin-top:12px;display:flex;gap:10px;">
                   <button type="submit" class="btn btn-primary btn-sm">Simpan</button>
                   ${s?`<button type="button" class="btn btn-ghost-dk btn-sm"
-                    onclick="hapusJadwal('${r.kelompok}','${mod.judul}','${ses.username}')">Hapus</button>`:''}
+                    onclick="hapusJadwal('${escAttr(r.kelompok)}','${escAttr(mod.judul)}','${escAttr(ses.username)}')">Hapus</button>`:''}
                 </div>
               </form>
             </div>`;
@@ -725,7 +1063,7 @@ async function loadJadwalA(ses){
         </div>
       </div>`;
     }).join('')}`);
-  }catch(e){setContent(`<p style="color:red">${e.message}</p>`);}
+  }catch(e){setContent(`<p style="color:red">${esc(e.message)}</p>`);}
 }
 async function submitJadwal(e,kelompokId,judul,setBy){
   e.preventDefault();const fd=new FormData(e.target);const btn=e.target.querySelector('button[type=submit]');
@@ -761,7 +1099,7 @@ async function loadNilaiA(ses){
       <div class="ff"><label>Modul</label>
         <select id="a-mod-sel" onchange="aModChange(this)">
           <option value="">Pilih modul</option>
-          ${myMods.map(m=>`<option value="${m.judul}">${m.kode} — ${m.judul}</option>`).join('')}
+          ${myMods.map(m=>`<option value="${esc(m.judul)}">${esc(m.kode)} — ${esc(m.judul)}</option>`).join('')}
         </select></div>
       <div class="ff"><label>Kelompok</label>
         <select id="a-grp-sel" disabled onchange="aGrpChange(this)">
@@ -787,15 +1125,15 @@ async function loadNilaiA(ses){
           const u=(users||[]).find(x=>x.username===g.username);
           const mod=myMods.find(m=>m.judul===g.judul);
           return`<tr>
-            <td>${u?u.name:g.username}</td>
-            <td>${mod?`<span class="tag blue" style="font-size:10px;">${mod.kode}</span>`:g.judul}</td>
-            <td>${u?u.kelompok:'—'}</td>
+            <td>${u?esc(u.name):esc(g.username)}</td>
+            <td>${mod?`<span class="tag blue" style="font-size:10px;">${esc(mod.kode)}</span>`:esc(g.judul)}</td>
+            <td>${u?esc(u.kelompok):'—'}</td>
             <td><span class="score-chip ${scoreClass(g.nilaiAkhir)}">${parseFloat(g.nilaiAkhir).toFixed(2)}</span></td>
             <td style="font-size:12px;color:var(--muted);">${g.updatedAt?new Date(g.updatedAt).toLocaleString('id-ID',{day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit'}):'-'}</td>
           </tr>`;}).join('')}
         </tbody></table></div>`;
     }
-  }catch(e){setContent(`<p style="color:red">${e.message}</p>`);}
+  }catch(e){setContent(`<p style="color:red">${esc(e.message)}</p>`);}
 }
 
 function aModChange(sel){
@@ -837,8 +1175,8 @@ async function loadRiwayatNilai(judul){
       <tbody>${done.map(g=>{
         const u=(window._aUsers||[]).find(x=>x.username===g.username);
         return`<tr>
-          <td>${u?u.name:g.username}</td>
-          <td>${u?u.kelompok:'—'}</td>
+          <td>${u?esc(u.name):esc(g.username)}</td>
+          <td>${u?esc(u.kelompok):'—'}</td>
           <td><span class="score-chip ${scoreClass(g.nilaiAkhir)}">${parseFloat(g.nilaiAkhir).toFixed(2)}</span></td>
           <td style="font-size:12px;color:var(--muted);">${g.updatedAt?new Date(g.updatedAt).toLocaleString('id-ID',{day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit'}):'-'}</td>
         </tr>`;}).join('')}
@@ -853,7 +1191,7 @@ function aGrpChange(sel){
   const list=(window._aUsers||[]).filter(u=>u.role==='praktikan'&&+u.kelompok===+sel.value);
   stu.disabled=false;
   stu.innerHTML='<option value="">Pilih praktikan</option>'+
-    list.map(u=>`<option value="${u.username}">${u.name}</option>`).join('');
+    list.map(u=>`<option value="${esc(u.username)}">${esc(u.name)}</option>`).join('');
 }
 
 async function aStuChange(sel){
@@ -869,8 +1207,8 @@ async function aStuChange(sel){
     const total=hitungTotal(g);
     wrap.innerHTML=`
     <div class="card">
-      <h3 style="margin-bottom:20px;">Nilai untuk ${u?u.name:sel.value}</h3>
-      <form onsubmit="submitNilaiA(event,'${sel.value}','${judul}','${setBy}')">
+      <h3 style="margin-bottom:20px;">Nilai untuk ${u?esc(u.name):esc(sel.value)}</h3>
+      <form onsubmit="submitNilaiA(event,'${escAttr(sel.value)}','${escAttr(judul)}','${escAttr(setBy)}')">
         <div class="total-preview">
           <div class="label">Total Akhir (auto-hitung)</div>
           <div class="score" id="total-preview-val">${total?total.toFixed(2):'—'}</div>
@@ -882,7 +1220,7 @@ async function aStuChange(sel){
             <div class="nform-num"><input type="number" name="${k.key}" min="0" max="100"
               value="${g[k.key]||''}" placeholder="—" oninput="updateTotal(this.form)"></div>
             <div class="nform-cat"><textarea name="${k.cat}"
-              placeholder="Catatan…" rows="1">${g[k.cat]||''}</textarea></div>
+              placeholder="Catatan…" rows="1">${esc(g[k.cat]||'')}</textarea></div>
           </div>`).join('')}
         </div>
         <button type="submit" class="btn btn-primary" id="btn-save-grade"
@@ -891,7 +1229,7 @@ async function aStuChange(sel){
         </button>
       </form>
     </div>`;
-  }catch(err){wrap.innerHTML=`<p style="color:red">${err.message}</p>`;}
+  }catch(err){wrap.innerHTML=`<p style="color:red">${esc(err.message)}</p>`;}
 }
 
 async function submitNilaiA(e,username,judul,setBy){
@@ -930,7 +1268,7 @@ async function loadAdminNilai(){
       <div class="ff">
         <label>Kelompok</label>
         <select id="ad-grp-sel" onchange="adGrpChange(this)">
-        <option value="">Pilih kelompok</option>${kelompoks.map(g=>`<option value="${g}">Kelompok ${g}</option>`).join('')}
+        <option value="">Pilih kelompok</option>${kelompoks.map(g=>`<option value="${esc(g)}">Kelompok ${esc(g)}</option>`).join('')}
         </select>
       </div>
       <div class="ff">
@@ -941,13 +1279,13 @@ async function loadAdminNilai(){
       </div>
     </div>
     <div id="ad-grade-wrap"></div>`);
-  }catch(e){setContent(`<p style="color:red">${e.message}</p>`);}
+  }catch(e){setContent(`<p style="color:red">${esc(e.message)}</p>`);}
 }
 function adGrpChange(sel){
   const stu=document.getElementById('ad-stu-sel');document.getElementById('ad-grade-wrap').innerHTML='';
   if(!sel.value){stu.disabled=true;stu.innerHTML='<option>Pilih kelompok dahulu</option>';return;}
   const list=(window._adUsers||[]).filter(u=>u.role==='praktikan'&&+u.kelompok===+sel.value);
-  stu.disabled=false;stu.innerHTML='<option value="">Pilih praktikan</option>'+list.map(u=>`<option value="${u.username}">${u.name}</option>`).join('');
+  stu.disabled=false;stu.innerHTML='<option value="">Pilih praktikan</option>'+list.map(u=>`<option value="${esc(u.username)}">${esc(u.name)}</option>`).join('');
 }
 async function adStuChange(sel){
   const wrap=document.getElementById('ad-grade-wrap');if(!sel.value){wrap.innerHTML='';return;}
@@ -960,12 +1298,12 @@ async function adStuChange(sel){
       <table>
       <thead><tr><th>Judul</th>${KOMP.map(k=>`<th>${k.label}<br><small style="font-weight:400;color:var(--muted)">${k.bobot}%</small></th>`).join('')}<th>Total</th></tr></thead>
       <tbody>${mods.map(m=>{const g=grades.find(x=>x.judul===m.id||x.judul===m.judul)||{};const total=g.nilaiAkhir||hitungTotal(g)||null;
-        return`<tr><td style="font-weight:500">${m.judul}</td>
+        return`<tr><td style="font-weight:500">${esc(m.judul)}</td>
           ${KOMP.map(k=>`<td>${g[k.key]!==undefined&&g[k.key]!==''?g[k.key]:'—'}</td>`).join('')}
           <td>${total?`<span class="score-chip ${scoreClass(total)}">${parseFloat(total).toFixed(2)}</span>`:'—'}</td>
         </tr>`;}).join('')}
       </tbody></table></div>`;
-  }catch(err){wrap.innerHTML=`<p style="color:red">${err.message}</p>`;}
+  }catch(err){wrap.innerHTML=`<p style="color:red">${esc(err.message)}</p>`;}
 }
 async function loadAdminPengguna(ses){
   setContent(loading());
@@ -975,10 +1313,10 @@ async function loadAdminPengguna(ses){
     setContent(`
     <div class="phero">${av(ses,'av-lg')}
       <div style="flex:1">
-        <h2>${ses.name}</h2>
+        <h2>${esc(ses.name)}</h2>
         <p>Administrator Laboratorium</p>
       </div>
-      <button class="btn btn-white btn-sm" onclick='openEditModal(${JSON.stringify(ses).replace(/'/g,"&#39;")})'>Edit Profil</button>
+      <button class="btn btn-white btn-sm" onclick='openEditModal(${escAttr(JSON.stringify(ses))})'>Edit Profil</button>
     </div> 
     <div class="ph">
       <span class="ey">Administrasi</span>
@@ -986,11 +1324,10 @@ async function loadAdminPengguna(ses){
     </div>
       <span class="slabel">Asisten Lab (${aslabs.length})</span>
       <div class="g g3" style="margin-bottom:28px;">${aslabs.map(a=>{
-        const m=mods.find(x=>x.id===a.judul);
         return`<div class="card">
-          <h3>${a.name}</h3>
-          <p>${m?m.judul:a.judul}</p>
-          <span class="tag blue" style="margin-top:8px;">Kelompok ${Array.isArray(a.kelompok)?a.kelompok.join(', '):a.kelompok}</span>
+          <h3>${esc(a.name)}</h3>
+          <p>${Array.isArray(a.kode)&&a.kode.length?esc(a.kode.join(', ')):'—'}</p>
+          <span class="tag blue" style="margin-top:8px;">Kelompok ${Array.isArray(a.kelompok)?esc(a.kelompok.join(', ')):esc(a.kelompok)}</span>
           </div>`;}).join('')}
       </div>
       <span class="slabel">Praktikan (${prak.length})</span>
@@ -1005,26 +1342,31 @@ async function loadAdminPengguna(ses){
             </tr>
           </thead>
           <tbody>${prak.map(p=>`<tr>
-            <td>${p.name}</td>
-            <td>${p.nrp||'—'}</td>
-            <td>${p.kelompok}</td>
-            <td>${p.username}</td>
+            <td>${esc(p.name)}</td>
+            <td>${esc(p.nrp||'—')}</td>
+            <td>${esc(p.kelompok)}</td>
+            <td>${esc(p.username)}</td>
           </tr>`).join('')}</tbody>
         </table>
       </div>`);
-  }catch(e){setContent(`<p style="color:red">${e.message}</p>`);}
+  }catch(e){setContent(`<p style="color:red">${esc(e.message)}</p>`);}
 }
 
 let _pp=null;
-const closeModal=()=>{document.getElementById('modal-root').innerHTML='';_pp=null;};
+const closeModal=()=>{
+  if(window._mustChangePassword) return;  // blokir sampai password diganti
+  document.getElementById('modal-root').innerHTML='';_pp=null;
+};
 function openEditModal(ses){
   if(typeof ses==='string') ses=JSON.parse(ses.replace(/&quot;/g,'"'));
   _pp=null;
+  const mcp = !!window._mustChangePassword;
   document.getElementById('modal-root').innerHTML=`
   <div class="modal-back" id="m-back">
     <div class="modal">
-      <button class="modal-close" onclick="closeModal()">✕</button>
-      <h3>Edit Profil</h3>
+      ${mcp?'':'<button class="modal-close" onclick="closeModal()">✕</button>'}
+      <h3>${mcp?'Wajib Ganti Password':'Edit Profil'}</h3>
+      ${mcp?'<div class="merr" style="margin-bottom:16px;">Akun Anda menggunakan password sementara. Wajib ganti password sebelum bisa melanjutkan.</div>':''}
       <div class="photo-row">
         <div id="pp">${av(ses)}</div>
         <label class="btn btn-white btn-sm" style="cursor:pointer;">${IC.camera} Ganti Foto
@@ -1034,7 +1376,7 @@ function openEditModal(ses){
       <form id="edit-form">
         <div id="edit-err"></div>
         <div class="mfield">
-          <label>Password Saat Ini 
+          <label>Password Saat Ini
             <span style="color:#aaa;font-weight:400;">(isi jika ingin ganti password)</span>
           </label>
           <input type="password" id="cur-p" placeholder="Kosongkan jika hanya ganti foto">
@@ -1062,6 +1404,10 @@ function openEditModal(ses){
   document.getElementById('edit-form').onsubmit=async e=>{
     e.preventDefault();
     const err=document.getElementById('edit-err'),curP=document.getElementById('cur-p').value,newP=document.getElementById('new-p').value,confP=document.getElementById('conf-p').value;
+    if(mcp&&!newP){
+      err.innerHTML='<div class="merr">Wajib mengisi password baru.</div>';
+      return;
+    }
     if(!_pp&&!newP&&!confP){
       err.innerHTML='<div class="merr">Belum ada perubahan.</div>';
       return;
@@ -1077,9 +1423,15 @@ function openEditModal(ses){
       }
     }
     const btn=document.getElementById('btn-sp');btn.disabled=true;btn.innerHTML='<span class="spinner spinner-dk"></span> Menyimpan…';
-    try{await api('updateProfile',{username:ses.username,oldPassword:curP,newPassword:newP||undefined,photo:_pp||undefined});
-      if(_pp)ses.photo=_pp;if(newP)ses.password=newP;setSession(ses);closeModal();toast('Profil berhasil diperbarui.');renderApp();}
-    catch(ex){err.innerHTML=`<div class="merr">${ex.message}</div>`;btn.disabled=false;btn.innerHTML='Simpan Perubahan';}
+    try{
+      const result=await api('updateProfile',{username:ses.username,oldPassword:curP,newPassword:newP||undefined,photo:_pp||undefined});
+      if(result.user&&result.user.photo) ses.photo=result.user.photo;
+      ses.must_change_password=false;
+      setSession(ses);
+      window._mustChangePassword=false;
+      closeModal();toast('Profil berhasil diperbarui.');renderApp();
+    }
+    catch(ex){err.innerHTML=`<div class="merr">${esc(ex.message)}</div>`;btn.disabled=false;btn.innerHTML='Simpan Perubahan';}
   };
 }
 

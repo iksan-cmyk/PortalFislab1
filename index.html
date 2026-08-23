@@ -156,8 +156,13 @@
 </div>
 <div id="modal-root"></div>
 
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.112.3/dist/umd/supabase.min.js"></script>
 <script>
-const API_URL = 'https://script.google.com/macros/s/AKfycbxe5oypxe-7A5f8pb59InPtArtm2PpQTx_V8tGRDs0SkizWukxjqTcPiWvvDnvt2aVvHw/exec';
+// Supabase — publishable (anon) key memang didesain terekspos, aman selama RLS benar.
+const SUPABASE_URL = 'https://aodrpjatqoxonoduihwm.supabase.co';
+const SUPABASE_PUBLISHABLE_KEY = 'sb_publishable_GmdVHFfjtnSm_km1PP7lUg_gtg5eLqU';
+const SB = window.supabase.createClient(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY);
+
 const APP = {
   modules: null,
   users: null,
