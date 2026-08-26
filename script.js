@@ -1,16 +1,17 @@
 'use strict';
 
 const KOMP = [
-  { key:'prelab',      label:'Pre-lab',             bobot:10, cat:'catPrelab'      },
-  { key:'inlab',       label:'In-lab',              bobot:10, cat:'catInlab'       },
-  { key:'abstrak',     label:'Abstrak',             bobot:10, cat:'catAbstrak'     },
-  { key:'pendahuluan', label:'Pendahuluan',         bobot:10, cat:'catPendahuluan' },
-  { key:'metodologi',  label:'Metodologi',          bobot:5,  cat:'catMetodologi'  },
-  { key:'analisis',    label:'Analisis+Perhitungan',bobot:20, cat:'catAnalisis'    },
-  { key:'pembahasan',  label:'Pembahasan',          bobot:25, cat:'catPembahasan'  },
-  { key:'kesimpulan',  label:'Kesimpulan',          bobot:10, cat:'catKesimpulan'  },
-  { key:'format',      label:'Format',              bobot:5,  cat:'catFormat'      },
-  { key:'plagiasi',    label:'Plagiasi/AI',         bobot:0,  cat:'catPlagiasi'    },
+  { key:'prelab',           label:'Pre-lab',                bobot:10, cat:'catPrelab'           },
+  { key:'inlab',            label:'In-lab',                 bobot:10, cat:'catInlab'            },
+  { key:'diskusi_keaktifan', label:'Diskusi dan Keaktifan',  bobot:10, cat:'catDiskusiKeaktifan' },
+  { key:'abstrak',          label:'Abstrak',                bobot:5,  cat:'catAbstrak'          },
+  { key:'pendahuluan',      label:'Pendahuluan',            bobot:10, cat:'catPendahuluan'      },
+  { key:'metodologi',       label:'Metodologi',             bobot:5,  cat:'catMetodologi'       },
+  { key:'analisis',         label:'Analisis+Perhitungan',   bobot:15, cat:'catAnalisis'         },
+  { key:'pembahasan',       label:'Pembahasan',             bobot:20, cat:'catPembahasan'       },
+  { key:'kesimpulan',       label:'Kesimpulan',             bobot:10, cat:'catKesimpulan'       },
+  { key:'format',           label:'Format',                 bobot:5,  cat:'catFormat'           },
+  { key:'plagiasi',         label:'Plagiasi/AI',            bobot:0,  cat:'catPlagiasi'         },
 ];
 function hitungTotal(g) {
   let total = 0;
@@ -18,6 +19,8 @@ function hitungTotal(g) {
     const val = parseFloat(g[k.key]);
     if (!isNaN(val) && k.bobot > 0) total += val * (k.bobot / 100);
   });
+  const plagiasiVal = parseFloat(g.plagiasi);
+  if (!isNaN(plagiasiVal)) total = Math.max(0, total - plagiasiVal);
   return Math.round(total * 100) / 100;
 }
 function scoreClass(v) {
@@ -228,8 +231,8 @@ async function apiGetUsers() {
 async function apiGetGrades(body) {
   let query = SB.from('grades').select(`
     username, module_id, set_by, updated_at, nilai_akhir,
-    prelab, inlab, abstrak, pendahuluan, metodologi, analisis, pembahasan, kesimpulan, format, plagiasi,
-    cat_prelab, cat_inlab, cat_abstrak, cat_pendahuluan, cat_metodologi, cat_analisis, cat_pembahasan, cat_kesimpulan, cat_format, cat_plagiasi,
+    prelab, inlab, diskusi_keaktifan, abstrak, pendahuluan, metodologi, analisis, pembahasan, kesimpulan, format, plagiasi,
+    cat_prelab, cat_inlab, cat_diskusi_keaktifan, cat_abstrak, cat_pendahuluan, cat_metodologi, cat_analisis, cat_pembahasan, cat_kesimpulan, cat_format, cat_plagiasi,
     modules:module_id(judul)
   `);
   if (body.username) query = query.eq('username', body.username);
@@ -245,11 +248,11 @@ async function apiGetGrades(body) {
     nilaiAkhir: g.nilai_akhir !== null ? String(g.nilai_akhir) : '',
     setBy: g.set_by,
     updatedAt: g.updated_at,
-    prelab: g.prelab ?? '', inlab: g.inlab ?? '', abstrak: g.abstrak ?? '',
-    pendahuluan: g.pendahuluan ?? '', metodologi: g.metodologi ?? '',
+    prelab: g.prelab ?? '', inlab: g.inlab ?? '', diskusi_keaktifan: g.diskusi_keaktifan ?? '',
+    abstrak: g.abstrak ?? '', pendahuluan: g.pendahuluan ?? '', metodologi: g.metodologi ?? '',
     analisis: g.analisis ?? '', pembahasan: g.pembahasan ?? '',
     kesimpulan: g.kesimpulan ?? '', format: g.format ?? '', plagiasi: g.plagiasi ?? '',
-    catPrelab: g.cat_prelab || '', catInlab: g.cat_inlab || '',
+    catPrelab: g.cat_prelab || '', catInlab: g.cat_inlab || '', catDiskusiKeaktifan: g.cat_diskusi_keaktifan || '',
     catAbstrak: g.cat_abstrak || '', catPendahuluan: g.cat_pendahuluan || '',
     catMetodologi: g.cat_metodologi || '', catAnalisis: g.cat_analisis || '',
     catPembahasan: g.cat_pembahasan || '', catKesimpulan: g.cat_kesimpulan || '',
@@ -343,10 +346,10 @@ async function apiSetGrade(body) {
     set_by: body.setBy,
     updated_at: new Date().toISOString(),
   };
-  const KOMP = ['prelab','inlab','abstrak','pendahuluan','metodologi','analisis','pembahasan','kesimpulan','format','plagiasi'];
+  const KOMP = ['prelab','inlab','diskusi_keaktifan','abstrak','pendahuluan','metodologi','analisis','pembahasan','kesimpulan','format','plagiasi'];
   const CAT = [
-    ['catPrelab','cat_prelab'], ['catInlab','cat_inlab'], ['catAbstrak','cat_abstrak'],
-    ['catPendahuluan','cat_pendahuluan'], ['catMetodologi','cat_metodologi'],
+    ['catPrelab','cat_prelab'], ['catInlab','cat_inlab'], ['catDiskusiKeaktifan','cat_diskusi_keaktifan'],
+    ['catAbstrak','cat_abstrak'], ['catPendahuluan','cat_pendahuluan'], ['catMetodologi','cat_metodologi'],
     ['catAnalisis','cat_analisis'], ['catPembahasan','cat_pembahasan'],
     ['catKesimpulan','cat_kesimpulan'], ['catFormat','cat_format'], ['catPlagiasi','cat_plagiasi'],
   ];
