@@ -134,7 +134,9 @@ async function migrateUsers() {
     };
     if (!existing.has(username)) {
       // AKUN BARU: buat Auth user + password sementara (dengan retry + jeda)
-      const tempPw = genPassword();
+      // Praktikan: password awal = username (dipaksa ganti di login pertama).
+      // aslab/admin: password random aman, dicatat di temp_passwords.csv.
+      const tempPw = (role === 'praktikan') ? username : genPassword();
       const email = `${username}@portalfislab.local`;
       const result = await createUserWithRetry({
         email,
