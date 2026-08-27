@@ -310,7 +310,7 @@ async function apiGetRotasi(body) {
   }
   return { rotasi: (data || []).map(r => ({
     kode: (r.modules && r.modules.kode) || '',
-    judul: (r.modules && r.modules.id) || '',
+    judul: (r.modules && r.modules.judul) || '',
     judulPanjang: (r.modules && r.modules.judul) || '',
     kelompok: r.kelompok,
     minggu: r.minggu,
