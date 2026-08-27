@@ -270,12 +270,21 @@ async function migrateSchedules() {
 
 // map camelCase catatan -> snake_case kolom
 const CAT_MAP = {
-  catPrelab: 'cat_prelab', catInlab: 'cat_inlab', catAbstrak: 'cat_abstrak',
-  catPendahuluan: 'cat_pendahuluan', catMetodologi: 'cat_metodologi',
-  catAnalisis: 'cat_analisis', catPembahasan: 'cat_pembahasan',
-  catKesimpulan: 'cat_kesimpulan', catFormat: 'cat_format', catPlagiasi: 'cat_plagiasi',
+  catPrelab: 'cat_prelab',
+  catInlabPengambilanData: 'cat_inlab_pengambilan_data',
+  catInlabDiskusi: 'cat_inlab_diskusi',
+  catInlabKerapian: 'cat_inlab_kerapian',
+  catAbstrak: 'cat_abstrak',
+  catPendahuluan: 'cat_pendahuluan',
+  catMetodologi: 'cat_metodologi',
+  catAnalisisData: 'cat_analisis_data',
+  catAnalisisPerhitunganGrafik: 'cat_analisis_perhitungan_grafik',
+  catPembahasan: 'cat_pembahasan',
+  catKesimpulan: 'cat_kesimpulan',
+  catFormat: 'cat_format',
+  catPlagiasi: 'cat_plagiasi',
 };
-const KOMP_KEYS = ['prelab','inlab','abstrak','pendahuluan','metodologi','analisis','pembahasan','kesimpulan','format','plagiasi'];
+const KOMP_KEYS = ['prelab','inlab_pengambilan_data','inlab_diskusi','inlab_kerapian','abstrak','pendahuluan','metodologi','analisis_data','analisis_perhitungan_grafik','pembahasan','kesimpulan','format','plagiasi'];
 
 async function migrateGrades() {
   console.log('\n=== grades ===');
