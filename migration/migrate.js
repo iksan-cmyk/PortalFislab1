@@ -1,20 +1,20 @@
 // migrate.js — Skrip migrasi CSV (ekspor Google Sheets) -> Supabase.
 // Idempotent: aman dijalankan ulang saat CSV diperbarui.
-//   - Username baru (belum ada di profiles) -> buat akun Auth + password sementara
-//   - Username yang sudah ada -> update field profil (name/role/nrp/kelompok/wa) saja,
-//     tidak buat ulang akun Auth, tidak generate password baru
-//   - temp_passwords.csv: APPEND antar-run (jangan overwrite)
+//   - Password diambil dari kolom `password` CSV untuk SEMUA role.
+//   - Akun baru (belum ada di profiles) -> buat akun Auth dengan password CSV,
+//     set must_change_password = true.
+//   - Akun yang sudah ada -> reset password via updateUserById dengan password CSV,
+//     set must_change_password = true.
+//   - Field profil (name/role/nrp/kelompok/wa) selalu diupdate dari CSV.
 //
 // Jalankan: cd migration && npm install && node migrate.js
 // Butuh file .env berisi SUPABASE_URL dan SUPABASE_SECRET_KEY.
 
-import { readFileSync, existsSync, appendFileSync } from 'node:fs';
-import { randomBytes } from 'node:crypto';
+import { readFileSync, existsSync } from 'node:fs';
 import { createClient } from '@supabase/supabase-js';
 import { parse } from 'csv-parse';
 
 const MIGRATION_DIR = import.meta.dirname.replace(/[\\/]$/, '');
-const TEMP_PW_PATH = `${MIGRATION_DIR}/temp_passwords.csv`;
 const SUPABASE_URL = process.env.SUPABASE_URL || loadEnv().SUPABASE_URL;
 const SECRET_KEY   = process.env.SUPABASE_SECRET_KEY || loadEnv().SUPABASE_SECRET_KEY;
 
@@ -48,20 +48,6 @@ function readCSV(file) {
   });
 }
 
-function genPassword(len = 12) {
-  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789';
-  let pw = '';
-  const buf = randomBytes(len);
-  for (let i = 0; i < len; i++) pw += chars[buf[i] % chars.length];
-  return pw;
-}
-
-function appendTempPw(username, name, pw) {
-  const header = existsSync(TEMP_PW_PATH) ? '' : 'username,name,temp_password\n';
-  const line = `${username},${JSON.stringify(name)},${pw}\n`;
-  appendFileSync(TEMP_PW_PATH, header + line);
-}
-
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
 // retry dengan exponential backoff untuk createUser (menghindari rate limit / fetch failed)
@@ -80,9 +66,11 @@ async function createUserWithRetry(payload, maxRetries = 3) {
 }
 
 async function getExistingUsernames() {
-  const { data, error } = await sb.from('profiles').select('username');
+  const { data, error } = await sb.from('profiles').select('username,id');
   if (error) throw error;
-  return new Set(data.map(r => r.username));
+  const map = new Map();
+  for (const r of data) map.set(r.username, r.id);
+  return map;
 }
 
 async function migrateModules() {
@@ -109,7 +97,7 @@ async function migrateModules() {
 async function migrateUsers() {
   console.log('\n=== users (auth + profiles) ===');
   const rows = await readCSV('Database Fislab - users.csv');
-  const existing = await getExistingUsernames();
+  const existing = await getExistingUsernames(); // Map username -> auth uid
   let created = 0, updated = 0, skipped = 0;
   for (const r of rows) {
     const username = (r.username || '').trim().toLowerCase();
@@ -124,6 +112,7 @@ async function migrateUsers() {
       console.warn(`  WARNING: role tidak dikenal "${role}" untuk username=${username}, skip.`);
       skipped++; continue;
     }
+    const password = (r.password || '').trim();
     const profRec = {
       username,
       name,
@@ -133,12 +122,15 @@ async function migrateUsers() {
       wa: r.wa ? r.wa.trim() : null,
     };
     if (!existing.has(username)) {
-      // AKUN BARU: buat Auth user + password sementara (dengan retry + jeda)
-      const tempPw = genPassword();
+      // AKUN BARU: buat Auth user dengan password dari CSV.
+      if (!password) {
+        console.warn(`  WARNING: akun baru ${username} tanpa password di CSV, skip (tidak bisa buat Auth).`);
+        skipped++; continue;
+      }
       const email = `${username}@portalfislab.local`;
       const result = await createUserWithRetry({
         email,
-        password: tempPw,
+        password,
         email_confirm: true,
       });
       if (result.error) {
@@ -154,19 +146,29 @@ async function migrateUsers() {
       }
       // tandai must_change_password
       await sb.from('profiles').update({ must_change_password: true }).eq('id', au.user.id);
-      appendTempPw(username, name, tempPw);
-      existing.add(username);
+      existing.set(username, au.user.id);
       created++;
-      console.log(`  + NEW ${username} (${role}) -> temp password dicatat`);
+      console.log(`  + NEW ${username} (${role}) -> password dari CSV, must_change_password=true`);
     } else {
-      // AKUN LAMA: update profil saja (termasuk role — poin #2)
+      // AKUN LAMA: update profil + reset password dari CSV.
+      const uid = existing.get(username);
       const { error: pe } = await sb.from('profiles').update(profRec).eq('username', username);
       if (pe) {
         console.warn(`  WARNING: gagal update profile username=${username}: ${pe.message}`);
         skipped++; continue;
       }
+      if (password) {
+        const { error: ue } = await sb.auth.admin.updateUserById(uid, { password });
+        if (ue) {
+          console.warn(`  WARNING: gagal reset password username=${username}: ${ue.message}`);
+        } else {
+          await sb.from('profiles').update({ must_change_password: true }).eq('username', username);
+        }
+      } else {
+        console.warn(`  NOTE: ${username} tanpa kolom password di CSV, profil diupdate tapi password tidak direset.`);
+      }
       updated++;
-      console.log(`  ~ UPD ${username} (${role})`);
+      console.log(`  ~ UPD ${username} (${role})${password ? ' -> password direset dari CSV, must_change_password=true' : ' (tanpa reset password)'}`);
     }
   }
   console.log(`  ${created} baru, ${updated} update, ${skipped} skip.`);
@@ -329,11 +331,6 @@ async function migrateGrades() {
 async function main() {
   console.log('=== PortalFislab1 — Migrasi CSV -> Supabase ===');
   console.log(`URL: ${SUPABASE_URL}`);
-  if (existsSync(TEMP_PW_PATH)) {
-    console.log(`temp_passwords.csv: akan APPEND ke file yang ada.`);
-  } else {
-    console.log(`temp_passwords.csv: akan dibuat baru.`);
-  }
 
   await migrateModules();
   await migrateUsers();
@@ -341,47 +338,7 @@ async function main() {
   await migrateSchedules();
   await migrateGrades();
 
-  await verifyConsistency();
-
   console.log('\n=== SELESAI ===');
-  if (existsSync(TEMP_PW_PATH)) {
-    console.log(`Password sementara: ${TEMP_PW_PATH}`);
-    console.log('BAGIKAN ke tiap pengguna, lalu HAPUS file ini dari disk.');
-  }
-}
-
-// Cek konsistensi: akun dengan must_change_password=true di profiles
-// harus punya baris di temp_passwords.csv. Kalau tidak, password sementara
-// hilang (mis: createUser timeout seperti kasus 5001251036).
-async function verifyConsistency() {
-  console.log('\n=== KONSISTENSI ===');
-  const { data, error } = await sb.from('profiles')
-    .select('username,name')
-    .eq('must_change_password', true);
-  if (error) { console.warn(`  WARNING: gagal query profiles untuk konsistensi: ${error.message}`); return; }
-  const mustChange = new Set((data || []).map(r => r.username));
-
-  const tempUsernames = new Set();
-  if (existsSync(TEMP_PW_PATH)) {
-    const lines = readFileSync(TEMP_PW_PATH, 'utf8').split('\n');
-    // skip header (baris pertama) dan baris kosong
-    for (let i = 1; i < lines.length; i++) {
-      const u = (lines[i].split(',', 1)[0] || '').trim();
-      if (u) tempUsernames.add(u);
-    }
-  }
-
-  const orphans = [...mustChange].filter(u => !tempUsernames.has(u));
-  if (orphans.length === 0) {
-    console.log(`  OK: ${mustChange.size} akun must_change_password, semua tercatat di temp_passwords.csv.`);
-  } else {
-    console.warn(`  WARNING: ${orphans.length} akun must_change_password TIDAK punya baris di temp_passwords.csv:`);
-    for (const u of orphans) {
-      const p = (data || []).find(r => r.username === u);
-      console.warn(`    - ${u} (${p ? p.name : '?'}) — password sementara hilang, perlu reset manual`);
-    }
-    console.warn('  Jalankan fix-orphan-user.js (atau reset manual di Dashboard) untuk akun-akun ini.');
-  }
 }
 
 main().catch(e => { console.error('FATAL:', e); process.exit(1); });
