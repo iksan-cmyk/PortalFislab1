@@ -86,6 +86,7 @@ async function migrateModules() {
       ringkas: r.ringkas || null,
       file_url: r.fileUrl || null,
       file_type: r.fileType || null,
+      urutan: r.kode ? (parseInt(String(r.kode).replace(/\D/g, ''), 10) || null) : null,
     };
     const { error } = await sb.from('modules').upsert(rec, { onConflict: 'id' }).select('id').single();
     if (error) { console.warn(`  WARNING: gagal upsert module id=${r.id}: ${error.message}`); }
@@ -122,18 +123,11 @@ async function migrateUsers() {
       wa: r.wa ? r.wa.trim() : null,
     };
     if (!existing.has(username)) {
-<<<<<<< HEAD
       // AKUN BARU: buat Auth user dengan password dari CSV.
       if (!password) {
         console.warn(`  WARNING: akun baru ${username} tanpa password di CSV, skip (tidak bisa buat Auth).`);
         skipped++; continue;
       }
-=======
-      // AKUN BARU: buat Auth user + password sementara (dengan retry + jeda)
-      // Praktikan: password awal = username (dipaksa ganti di login pertama).
-      // aslab/admin: password random aman, dicatat di temp_passwords.csv.
-      const tempPw = (role === 'praktikan') ? username : genPassword();
->>>>>>> 19ac5b6e0421bd3a90bd987b68370e18b1098d48
       const email = `${username}@portalfislab.local`;
       const result = await createUserWithRetry({
         email,

@@ -220,6 +220,16 @@ html.dark select option {
 .btn-ghost-dk:hover {
   background: rgba(0,0,0,.06); 
 }
+.btn-danger {
+  background: transparent;
+  color: #ef4444;
+  padding: 0 16px;
+  border: 1.5px solid rgba(239,68,68,.4);
+}
+.btn-danger:hover {
+  background: rgba(239,68,68,.12);
+  border-color: #ef4444;
+}
 .btn-sm {
   height: 36px; 
   font-size: 13px; 

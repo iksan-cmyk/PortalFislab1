@@ -89,6 +89,18 @@ Setiap komponen punya pasangan kolom catatan `cat_<key>` (mis.
 `KOMP_KEYS`/`CAT_MAP` di `migration/migrate.js`, trigger
 `recompute_nilai_akhir` di `0006_skema_nilai_v3.sql`. Ketiganya wajib sinkron.
 
+## Urutan modul
+
+Tabel `modules` punya kolom `urutan` (integer, NOT NULL, UNIQUE) yang dipakai
+untuk pengurutan tampilan kartu modul di landing page & halaman "Modul
+Praktikum". Kolom ini terpisah dari `id` (yang tetap `text` dan dipakai sebagai
+FK di `rotasi`/`schedules`/`grades`) — `id` **tidak boleh** dipakai untuk
+`.order()` karena bertipe text sehingga urutan alfabetis (`1,10,2,...`).
+
+Frontend memanggil `.order('urutan')` di `apiGetModules()` (lihat
+`script.js`). Backfill awal mengambil angka dari `kode` (E1 → 1, E10 → 10);
+migration: `supabase/migrations/0007_modules_urutan.sql`.
+
 ## Keamanan
 
 Ringkasan singkat — detail lengkap dan justifikasi ada di

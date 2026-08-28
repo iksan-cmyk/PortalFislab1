@@ -50,6 +50,7 @@ async function api(action, body={}, useCache=false) {
     case 'getRotasi':     data = await apiGetRotasi(body); break;
     case 'setSchedule':   data = await apiSetSchedule(body); break;
     case 'setGrade':      data = await apiSetGrade(body); break;
+    case 'deleteGrade':   data = await apiDeleteGrade(body); break;
     default: throw new Error('Unknown action: ' + action);
   }
   if (useCache) cacheSet(cacheKey, data);
@@ -161,7 +162,7 @@ async function getModuleIdByJudul(judul) {
 async function apiGetModules() {
   const { data, error } = await SB.from('modules')
     .select('id,kode,judul,ringkas,file_url,file_type')
-    .order('id');
+    .order('urutan');
   if (error) throw new Error(error.message);
   return { modules: (data || []).map(m => ({
     id: m.id,
@@ -289,7 +290,8 @@ async function apiGetSchedules(body) {
 /* — getRotasi: body {kelompok?} atau {kode:'E1,E2'} — */
 async function apiGetRotasi(body) {
   let query = SB.from('rotasi')
-    .select('kelompok, minggu, aslab_username, modules:module_id(id, kode, judul)');
+    .select('kelompok, minggu, aslab_username, modules:module_id(id, kode, judul)')
+    .order('minggu', { ascending: true });
   if (body.kelompok) query = query.eq('kelompok', parseInt(body.kelompok));
   if (body.kode) {
     const kodeList = body.kode.split(',').map(k => k.trim()).filter(Boolean);
@@ -370,6 +372,15 @@ async function apiSetGrade(body) {
   // nilaiAkhir sengaja TIDAK dikirim — trigger recompute_nilai_akhir menghitung ulang di server
   const { error } = await SB.from('grades')
     .upsert(rec, { onConflict: 'username,module_id' });
+  if (error) throw new Error(error.message);
+  return { success: true };
+}
+
+/* — deleteGrade: body {username, judul}. Hapus baris nilai (untuk koreksi salah input). — */
+async function apiDeleteGrade(body) {
+  const moduleId = await getModuleIdByJudul(body.judul);
+  const { error } = await SB.from('grades')
+    .delete().eq('username', body.username).eq('module_id', moduleId);
   if (error) throw new Error(error.message);
   return { success: true };
 }
@@ -1131,7 +1142,7 @@ async function loadNilaiA(ses){
       wrap.innerHTML = `
       <div class="ph" style="margin-top:32px;"><span class="ey">Riwayat</span><h1>Sudah Dinilai</h1></div>
       <div class="tw"><table class="riwayat-table">
-        <thead><tr><th>Nama</th><th>Modul</th><th>Kelompok</th><th>Total Akhir</th><th>Diinput</th></tr></thead>
+        <thead><tr><th>Nama</th><th>Modul</th><th>Kelompok</th><th>Total Akhir</th><th>Diinput</th><th>Aksi</th></tr></thead>
         <tbody>${semua.map(g=>{
           const u=(users||[]).find(x=>x.username===g.username);
           const mod=myMods.find(m=>m.judul===g.judul);
@@ -1141,6 +1152,7 @@ async function loadNilaiA(ses){
             <td>${u?esc(u.kelompok):'—'}</td>
             <td><span class="score-chip ${scoreClass(g.nilaiAkhir)}">${parseFloat(g.nilaiAkhir).toFixed(2)}</span></td>
             <td style="font-size:12px;color:var(--muted);">${g.updatedAt?new Date(g.updatedAt).toLocaleString('id-ID',{day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit'}):'-'}</td>
+            <td><button type="button" class="btn btn-sm btn-danger" onclick="batalNilai('${escAttr(g.username)}','${escAttr(g.judul)}')">Batal</button></td>
           </tr>`;}).join('')}
         </tbody></table></div>`;
     }
@@ -1182,7 +1194,7 @@ async function loadRiwayatNilai(judul){
     wrap.innerHTML=`
     <div class="ph" style="margin-top:32px;"><span class="ey">Riwayat</span><h1>Sudah Dinilai</h1></div>
     <div class="tw"><table class="riwayat-table">
-      <thead><tr><th>Nama</th><th>Kelompok</th><th>Total Akhir</th><th>Diinput</th></tr></thead>
+      <thead><tr><th>Nama</th><th>Kelompok</th><th>Total Akhir</th><th>Diinput</th><th>Aksi</th></tr></thead>
       <tbody>${done.map(g=>{
         const u=(window._aUsers||[]).find(x=>x.username===g.username);
         return`<tr>
@@ -1190,6 +1202,7 @@ async function loadRiwayatNilai(judul){
           <td>${u?esc(u.kelompok):'—'}</td>
           <td><span class="score-chip ${scoreClass(g.nilaiAkhir)}">${parseFloat(g.nilaiAkhir).toFixed(2)}</span></td>
           <td style="font-size:12px;color:var(--muted);">${g.updatedAt?new Date(g.updatedAt).toLocaleString('id-ID',{day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit'}):'-'}</td>
+          <td><button type="button" class="btn btn-sm btn-danger" onclick="batalNilai('${escAttr(g.username)}','${escAttr(judul)}')">Batal</button></td>
         </tr>`;}).join('')}
       </tbody></table></div>`;
   }catch(_){wrap.innerHTML='';}
@@ -1258,6 +1271,16 @@ async function submitNilaiA(e,username,judul,setBy){
     loadRiwayatNilai(judul);
   }catch(err){toast('Gagal: '+err.message);}
   finally{btn.disabled=false;btn.innerHTML='Simpan Nilai & Catatan';}
+}
+
+async function batalNilai(username, judul){
+  if(!confirm('Batalkan nilai yang sudah tersimpan untuk peserta ini? Nilai & catatan akan dihapus dan tidak bisa dikembalikan.'))return;
+  try{
+    await api('deleteGrade',{username,judul});
+    CACHE={};APP.grades=null;
+    toast('Nilai dibatalkan.');
+    if (window._aSes) loadNilaiA(window._aSes);
+  }catch(err){toast('Gagal: '+err.message);}
 }
 
 /*admin anjy*/
@@ -1368,6 +1391,12 @@ const closeModal=()=>{
   if(window._mustChangePassword) return;  // blokir sampai password diganti
   document.getElementById('modal-root').innerHTML='';_pp=null;
 };
+function logoutDariGantiPassword(){
+  if(!confirm('Keluar dari akun ini? Anda perlu login ulang.'))return;
+  window._mustChangePassword=false;
+  document.getElementById('modal-root').innerHTML='';
+  clearSession();CACHE={};showLanding();
+}
 function openEditModal(ses){
   if(typeof ses==='string') ses=JSON.parse(ses.replace(/&quot;/g,'"'));
   _pp=null;
@@ -1375,7 +1404,7 @@ function openEditModal(ses){
   document.getElementById('modal-root').innerHTML=`
   <div class="modal-back" id="m-back">
     <div class="modal">
-      ${mcp?'':'<button class="modal-close" onclick="closeModal()">✕</button>'}
+      ${mcp?'<button class="modal-close" onclick="logoutDariGantiPassword()" title="Keluar">✕</button>':'<button class="modal-close" onclick="closeModal()">✕</button>'}
       <h3>${mcp?'Wajib Ganti Password':'Edit Profil'}</h3>
       ${mcp?'<div class="merr" style="margin-bottom:16px;">Akun Anda menggunakan password sementara. Wajib ganti password sebelum bisa melanjutkan.</div>':''}
       <div class="photo-row">
@@ -1387,9 +1416,7 @@ function openEditModal(ses){
       <form id="edit-form">
         <div id="edit-err"></div>
         <div class="mfield">
-          <label>Password Saat Ini
-            <span style="color:#aaa;font-weight:400;">(isi jika ingin ganti password)</span>
-          </label>
+          <label>Password Saat Ini </label>
           <input type="password" id="cur-p" placeholder="Kosongkan jika hanya ganti foto">
         </div>
         <div class="mfield">
