@@ -128,7 +128,7 @@ async function migrateUsers() {
         console.warn(`  WARNING: akun baru ${username} tanpa password di CSV, skip (tidak bisa buat Auth).`);
         skipped++; continue;
       }
-      const email = `${username}@portalfislab.local`;
+      const email = `${username}@student.its.ac.id`;
       const result = await createUserWithRetry({
         email,
         password,
