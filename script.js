@@ -61,7 +61,7 @@ async function api(action, body={}, useCache=false) {
 async function apiLogin(body) {
   const username = (body.username || '').trim().toLowerCase();
   if (!username) throw new Error('Username wajib diisi.');
-  const email = `${username}@portalfislab.local`;
+  const email = `${username}@student.its.ac.id`;
   const { data, error } = await SB.auth.signInWithPassword({ email, password: body.password });
   if (error) throw new Error(error.message);
   const uid = data.user.id;
@@ -100,7 +100,7 @@ async function apiUpdateProfile(body) {
   if (body.newPassword) {
     // verifikasi password lama dengan re-auth
     if (body.oldPassword) {
-      const email = `${ses.username}@portalfislab.local`;
+      const email = `${ses.username}@student.its.ac.id`;
       const { error: reErr } = await SB.auth.signInWithPassword({ email, password: body.oldPassword });
       if (reErr) throw new Error('Password saat ini salah.');
     }
