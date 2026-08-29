@@ -1071,7 +1071,7 @@ async function loadJadwalA(ses){
                   <div class="ff"><label>Tanggal</label>
                     <input type="date" name="tanggal" value="${s?s.tanggal:''}" required></div>
                   <div class="ff"><label>Sesi</label>
-                    <select name="sesi">${['Sesi 1 (08.00)','Sesi 2 (10.00)','Sesi 3 (13.00)','Sesi 4 (15.00)'].map(x=>`<option ${s&&s.sesi===x?'selected':''}>${x}</option>`).join('')}</select>
+                    <select name="sesi">${['Sesi 1 (08.00)','Sesi 2 (10.00)','Sesi 3 (13.00)','Sesi 4 (15.00)', 'Sesi 5 (17.00)', 'Sesi 6 (19.00)'].map(x=>`<option ${s&&s.sesi===x?'selected':''}>${x}</option>`).join('')}</select>
                   </div>
                 </div>
                 <div style="margin-top:12px;display:flex;gap:10px;">
