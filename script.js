@@ -1013,6 +1013,21 @@ const NAV_A=[{path:'/a/jadwal',label:'Jadwal',icon:'jadwal'},{path:'/a/nilai',la
 function renderAslab(hash,ses){const path=hash||'/a/jadwal';buildNav(NAV_A,path);
   switch(path){case'/a/nilai':loadNilaiA(ses);break;case'/a/profil':loadProfilA(ses);break;default:loadJadwalA(ses);}
 }
+
+const SESI_SENIN_KAMIS = ['07.30-08.50','09.00-10.20','10.30-11.50','12.30-13.50','14.00-15.20','19.30-20.50','21.00-22.20'];
+const SESI_JUMAT       = ['07.00-08.20','08.20-09.40','09.40-11.00','13.00-14.20','14.30-15.50','19.30-20.50','21.00-22.20'];
+function getSesiOptions(tanggal){
+  if(!tanggal) return SESI_SENIN_KAMIS;
+  const day = new Date(tanggal+'T00:00:00').getDay(); // 0=Minggu...5=Jumat,6=Sabtu
+  return day===5 ? SESI_JUMAT : SESI_SENIN_KAMIS;
+}
+function updateSesiOptions(dateInput){
+  const select = dateInput.closest('.fr').querySelector('select[name="sesi"]');
+  const current = select.value;
+  const opts = getSesiOptions(dateInput.value);
+  select.innerHTML = opts.map(x=>`<option ${x===current?'selected':''}>${x}</option>`).join('');
+}
+
 function loadProfilA(ses){
   console.log("SESSION", JSON.stringify(ses, null, 2));
   setContent(`<div class="phero">${av(ses,'av-lg')}<div style="flex:1"><h2>${esc(ses.name)}</h2><p>Asisten Lab</p></div>
@@ -1069,10 +1084,10 @@ async function loadJadwalA(ses){
               <form onsubmit="submitJadwal(event,'${escAttr(r.kelompok)}','${escAttr(mod.judul)}','${escAttr(ses.username)}')">
                 <div class="fr">
                   <div class="ff"><label>Tanggal</label>
-                    <input type="date" name="tanggal" value="${s?s.tanggal:''}" required></div>
-                  <div class="ff"><label>Sesi</label>
-                    <select name="sesi">${['Sesi 1 (08.00)','Sesi 2 (10.00)','Sesi 3 (13.00)','Sesi 4 (15.00)', 'Sesi 5 (17.00)', 'Sesi 6 (19.00)'].map(x=>`<option ${s&&s.sesi===x?'selected':''}>${x}</option>`).join('')}</select>
-                  </div>
+                <input type="date" name="tanggal" value="${s?s.tanggal:''}" required onchange="updateSesiOptions(this)"></div>
+              <div class="ff"><label>Sesi</label>
+                <select name="sesi">${getSesiOptions(s?s.tanggal:'').map(x=>`<option ${s&&s.sesi===x?'selected':''}>${x}</option>`).join('')}</select>
+              </div>
                 </div>
                 <div style="margin-top:12px;display:flex;gap:10px;">
                   <button type="submit" class="btn btn-primary btn-sm">Simpan</button>
