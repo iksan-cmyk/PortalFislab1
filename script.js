@@ -1011,7 +1011,7 @@ Kamsia`;
 /*aslab*/
 const NAV_A=[{path:'/a/jadwal',label:'Jadwal',icon:'jadwal'},{path:'/p/modul',label:'Modul',icon:'modul'},{path:'/a/nilai',label:'Nilai',icon:'nilai'},{path:'/a/profil',label:'Profil',icon:'profil'}];
 function renderAslab(hash,ses){const path=hash||'/a/jadwal';buildNav(NAV_A,path);
-  switch(path){case'/a/nilai':loadNilaiA(ses);break;case'/a/profil':loadProfilA(ses);break;default:loadJadwalA(ses);}
+  switch(path){case'/a/modul':loadModulP(ses);break;case'/a/nilai':loadNilaiA(ses);break;case'/a/profil':loadProfilA(ses);break;default:loadJadwalA(ses);}
 }
 function loadProfilA(ses){
   console.log("SESSION", JSON.stringify(ses, null, 2));
