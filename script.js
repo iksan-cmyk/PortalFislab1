@@ -51,6 +51,7 @@ async function api(action, body={}, useCache=false) {
     case 'setSchedule':   data = await apiSetSchedule(body); break;
     case 'setGrade':      data = await apiSetGrade(body); break;
     case 'deleteGrade':   data = await apiDeleteGrade(body); break;
+    case 'getKatalogJadwal': data = await apiGetKatalogJadwal(); break;
     default: throw new Error('Unknown action: ' + action);
   }
   if (useCache) cacheSet(cacheKey, data);
@@ -341,6 +342,21 @@ async function apiSetSchedule(body) {
     }, { onConflict: 'module_id,kelompok' });
   if (error) throw new Error(error.message);
   return { success: true };
+}
+
+/* — getKatalogJadwal: ambil seluruh pilihan jadwal semua aslab (lintas-aslab) via RPC
+   SECURITY DEFINER katalog_jadwal_aslab (lihat 0008_batas_aslab_jadwal.sql).
+   Dipakai untuk indikator terisi (Task 1b) & katalog read-only (Task 2).
+   Mengembalikan { katalog: [{tanggal, sesi, set_by, aslab_name}] } urut tanggal DESC. — */
+async function apiGetKatalogJadwal() {
+  const { data, error } = await SB.rpc('katalog_jadwal_aslab');
+  if (error) throw new Error(error.message);
+  return { katalog: (data || []).map(r => ({
+    tanggal:    r.tanggal,
+    sesi:       r.sesi,
+    setBy:      r.set_by,
+    aslabName:  r.aslab_name,
+  }))};
 }
 
 /* — setGrade: body {username, judul, setBy, 10 komponen, 10 catatan, nilaiAkhir(ignored)}.
@@ -1009,23 +1025,41 @@ Kamsia`;
 }
 
 /*aslab*/
-const NAV_A=[{path:'/a/jadwal',label:'Jadwal',icon:'jadwal'},{path:'/a/nilai',label:'Nilai',icon:'nilai'},{path:'/a/profil',label:'Profil',icon:'profil'}];
+const NAV_A=[{path:'/a/jadwal',label:'Jadwal',icon:'jadwal'},{path:'/a/katalog',label:'Katalog',icon:'jadwal'},{path:'/a/nilai',label:'Nilai',icon:'nilai'},{path:'/a/profil',label:'Profil',icon:'profil'}];
 function renderAslab(hash,ses){const path=hash||'/a/jadwal';buildNav(NAV_A,path);
-  switch(path){case'/a/nilai':loadNilaiA(ses);break;case'/a/profil':loadProfilA(ses);break;default:loadJadwalA(ses);}
+  switch(path){case'/a/katalog':loadKatalogA(ses);break;case'/a/nilai':loadNilaiA(ses);break;case'/a/profil':loadProfilA(ses);break;default:loadJadwalA(ses);}
 }
 
 const SESI_SENIN_KAMIS = ['07.30-08.50','09.00-10.20','10.30-11.50','12.30-13.50','14.00-15.20','19.30-20.50','21.00-22.20'];
 const SESI_JUMAT       = ['07.00-08.20','08.20-09.40','09.40-11.00','13.00-14.20','14.30-15.50','19.30-20.50','21.00-22.20'];
+const MAX_ASLAB_PER_SLOT = 3; // batas trigger DB (0008_batas_aslab_jadwal.sql)
+// _jadwalTerisi: Map "tanggal|sesi" -> jumlah aslab terisi (lintas-aslab, via RPC katalog_jadwal_aslab).
+// Diisi saat loadJadwalA; dipakai sesiOptionsHtml/updateSesiOptions untuk indikator "x/3" & "Penuh".
+window._jadwalTerisi = null;
 function getSesiOptions(tanggal){
   if(!tanggal) return SESI_SENIN_KAMIS;
   const day = new Date(tanggal+'T00:00:00').getDay(); // 0=Minggu...5=Jumat,6=Sabtu
   return day===5 ? SESI_JUMAT : SESI_SENIN_KAMIS;
 }
+function terisiCount(tanggal, sesi){
+  if(!window._jadwalTerisi || !tanggal) return 0;
+  return window._jadwalTerisi.get(tanggal+'|'+sesi) || 0;
+}
+// sesiOptionsHtml: opsi sesi + indikator terisi (x/3) atau disabled "Penuh" jika sudah 3.
+// Catatan: opsi yang sudah penuh TETAP selected kalau itu nilai saat ini (aslab keep slot sendiri);
+// trigger DB exclude diri sendiri (set_by IS DISTINCT FROM) -> simpan slot sendiri tetap aman.
+function sesiOptionsHtml(tanggal, currentSesi){
+  return getSesiOptions(tanggal).map(x=>{
+    const c = terisiCount(tanggal, x);
+    const full = c >= MAX_ASLAB_PER_SLOT;
+    const label = full ? x+' (Penuh)' : (c>0 ? x+' ('+c+'/'+MAX_ASLAB_PER_SLOT+')' : x);
+    return `<option value="${esc(x)}" ${x===currentSesi?'selected':''} ${full?'disabled':''}>${esc(label)}</option>`;
+  }).join('');
+}
 function updateSesiOptions(dateInput){
   const select = dateInput.closest('.fr').querySelector('select[name="sesi"]');
   const current = select.value;
-  const opts = getSesiOptions(dateInput.value);
-  select.innerHTML = opts.map(x=>`<option ${x===current?'selected':''}>${x}</option>`).join('');
+  select.innerHTML = sesiOptionsHtml(dateInput.value, current);
 }
 
 function loadProfilA(ses){
@@ -1059,6 +1093,18 @@ async function loadJadwalA(ses){
     );
     const schedules = allSchedules.flat();
 
+    // ambil katalog jadwal lintas-aslab (RPC SECURITY DEFINER) untuk indikator terisi per slot.
+    // Gagal ambil -> indikator nonaktif (slot tetap bisa dipilih; trigger DB tetap jadi sumber kebenaran).
+    try {
+      const { katalog } = await api('getKatalogJadwal');
+      const m = new Map();
+      for (const row of katalog) {
+        const k = (row.tanggal||'') + '|' + (row.sesi||'');
+        m.set(k, (m.get(k) || 0) + 1);
+      }
+      window._jadwalTerisi = m;
+    } catch(_) { window._jadwalTerisi = null; }
+
     setContent(`
     <div class="ph"><span class="ey">Pengaturan</span><h1>Jadwal Praktikum</h1></div>
     ${myMods.map(mod=>{
@@ -1086,7 +1132,7 @@ async function loadJadwalA(ses){
                   <div class="ff"><label>Tanggal</label>
                 <input type="date" name="tanggal" value="${s?s.tanggal:''}" required onchange="updateSesiOptions(this)"></div>
               <div class="ff"><label>Sesi</label>
-                <select name="sesi">${getSesiOptions(s?s.tanggal:'').map(x=>`<option ${s&&s.sesi===x?'selected':''}>${x}</option>`).join('')}</select>
+                <select name="sesi">${sesiOptionsHtml(s?s.tanggal:'', s?s.sesi:'')}</select>
               </div>
                 </div>
                 <div style="margin-top:12px;display:flex;gap:10px;">
@@ -1113,12 +1159,80 @@ async function submitJadwal(e,kelompokId,judul,setBy){
     APP.schedules = null;
     toast(`Jadwal kelompok ${kelompokId} tersimpan.`);renderApp();
   }
-  catch(err){toast('Gagal: '+err.message);btn.disabled=false;btn.textContent='Simpan';}
+  catch(err){
+    // Race condition: dua aslab submit bersamaan, slot ke-4 kena trigger DB (P0001).
+    // Tangkap, beri pesan jelas, lalu refresh data opsi supaya indikator sinkron lagi.
+    if (/sudah penuh|maksimal 3 aslab/i.test(err.message)) {
+      toast('Jadwal ini sudah penuh (maks 3 aslab per tanggal). Pilih sesi/tanggal lain.');
+      window._jadwalTerisi = null; // paksa ambil ulang indikator
+      renderApp(); // renderApp -> loadJadwalA -> re-fetch katalog, tampilan sinkron
+    } else {
+      toast('Gagal: '+err.message);btn.disabled=false;btn.textContent='Simpan';
+    }
+  }
 }
 async function hapusJadwal(kelompokId,judul,setBy){
   if(!confirm(`Hapus jadwal kelompok ${kelompokId}?`))return;
   try{await api('setSchedule',{kelompokId:+kelompokId,judul,tanggal:'',sesi:'',setBy});toast('Jadwal dihapus.');renderApp();}
   catch(err){toast('Gagal: '+err.message);}
+}
+
+/* — Katalog Jadwal Praktikum (Task 2): tampil seluruh pilihan jadwal SEMUA aslab,
+   read-only, group per tanggal (paling jauh di masa depan di atas). Akses baca lintas-aslab
+   via RPC katalog_jadwal_aslab yang sama dengan indikator Task 1b (jangan buat mekanisme terpisah). — */
+async function loadKatalogA(ses){
+  setContent(loading());
+  try{
+    const { katalog } = await api('getKatalogJadwal');
+    // group by tanggal (urut DESC dari RPC), lalu by sesi (urut ASC dari RPC).
+    // Map menjaga urutan insert -> tanggal & sesi tetap terurut sesuai hasil RPC.
+    const byTanggal = new Map();
+    for (const row of katalog) {
+      if (!byTanggal.has(row.tanggal)) byTanggal.set(row.tanggal, new Map());
+      const bySesi = byTanggal.get(row.tanggal);
+      if (!bySesi.has(row.sesi)) bySesi.set(row.sesi, []);
+      bySesi.get(row.sesi).push(row.aslabName || row.setBy || '(tanpa nama)');
+    }
+    const tanggals = [...byTanggal.keys()]; // sudah DESC (paling jauh di masa depan duluan)
+    if (!tanggals.length) {
+      setContent(`<div class="ph"><span class="ey">Katalog</span><h1>Katalog Jadwal Praktikum</h1></div>
+        <div class="card"><p style="color:var(--muted);">Belum ada jadwal yang diambil aslab mana pun.</p></div>`);
+      return;
+    }
+    setContent(`
+    <div class="ph"><span class="ey">Katalog</span><h1>Katalog Jadwal Praktikum</h1></div>
+    <p style="margin-bottom:18px;font-size:13px;color:var(--muted);max-width:560px;line-height:1.65;">
+      Daftar jadwal praktikum semua aslab — hanya lihat. Maksimal ${MAX_ASLAB_PER_SLOT} aslab per sesi per tanggal; slot yang masih kosong dapat diisi di halaman Jadwal.
+    </p>
+    ${tanggals.map(tgl=>{
+      const bySesi = byTanggal.get(tgl);
+      const sesiList = [...bySesi.keys()];
+      return `<div class="card" style="margin-bottom:16px;">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;">
+          <h3 style="margin:0;font-size:16px;">${esc(fmtTgl(tgl))}</h3>
+          <span class="tag" style="font-size:11px;">${sesiList.length} sesi</span>
+        </div>
+        <div class="tw"><table class="riwayat-table">
+          <thead><tr><th>Sesi</th><th>Aslab pengambil slot</th><th style="text-align:right;">Terisi</th></tr></thead>
+          <tbody>${sesiList.map(sesi=>{
+            const names = bySesi.get(sesi);
+            const filled = names.length;
+            const slots = names.slice();
+            while (slots.length < MAX_ASLAB_PER_SLOT) slots.push(null);
+            const tagsHtml = slots.map(n => n
+              ? `<span class="tag green" style="margin:2px 6px 2px 0;">${esc(n)}</span>`
+              : `<span class="tag" style="margin:2px 6px 2px 0;opacity:.55;">Kosong</span>`).join('');
+            const chipCls = filled >= MAX_ASLAB_PER_SLOT ? 'amber' : 'blue';
+            return `<tr>
+              <td style="font-weight:600;white-space:nowrap;">${esc(sesi)}</td>
+              <td>${tagsHtml}</td>
+              <td style="text-align:right;white-space:nowrap;"><span class="tag ${chipCls}" style="font-size:11px;">${filled}/${MAX_ASLAB_PER_SLOT}</span></td>
+            </tr>`;
+          }).join('')}</tbody>
+        </table></div>
+      </div>`;
+    }).join('')}`);
+  }catch(e){setContent(`<p style="color:red">${esc(e.message)}</p>`);}
 }
 
 async function loadNilaiA(ses){
