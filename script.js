@@ -1025,9 +1025,9 @@ Kamsia`;
 }
 
 /*aslab*/
-const NAV_A=[{path:'/a/jadwal',label:'Jadwal',icon:'jadwal'},{path:'/a/katalog',label:'Katalog',icon:'jadwal'},{path:'/a/nilai',label:'Nilai',icon:'nilai'},{path:'/a/profil',label:'Profil',icon:'profil'}];
+const NAV_A=[{path:'/a/jadwal',label:'Jadwal',icon:'jadwal'},{path:'/a/katalog',label:'Katalog',icon:'jadwal'},{path:'/a/nilai',label:'Nilai',icon:'nilai'},{path:'/a/modul',label:'Modul',icon:'modul'},{path:'/a/profil',label:'Profil',icon:'profil'}];
 function renderAslab(hash,ses){const path=hash||'/a/jadwal';buildNav(NAV_A,path);
-  switch(path){case'/a/katalog':loadKatalogA(ses);break;case'/a/nilai':loadNilaiA(ses);break;case'/a/profil':loadProfilA(ses);break;default:loadJadwalA(ses);}
+  switch(path){case'/a/katalog':loadKatalogA(ses);break;case'/a/nilai':loadNilaiA(ses);break;case'/a/modul':loadModulA(ses);break;case'/a/profil':loadProfilA(ses);break;default:loadJadwalA(ses);}
 }
 
 const SESI_SENIN_KAMIS = ['07.30-08.50','09.00-10.20','10.30-11.50','12.30-13.50','14.00-15.20','19.30-20.50','21.00-22.20'];
@@ -1232,6 +1232,22 @@ async function loadKatalogA(ses){
         </table></div>
       </div>`;
     }).join('')}`);
+  }catch(e){setContent(`<p style="color:red">${esc(e.message)}</p>`);}
+}
+
+/* — Modul Praktikum (aslab): daftar modul sama seperti halaman praktikan, read-only,
+   klik kartu buka viewer. Dipakai aslab untuk lihat file modul yang dipegang/sedang dinilai. — */
+async function loadModulA(){
+  setContent(loading('Memuat modul…'));
+  try{
+    const mods=await getMods();
+    setContent(`<div class="ph"><span class="ey">Materi</span><h1>Modul Praktikum</h1></div>
+      <div class="g g3">${mods.map((m,i)=>`
+        <div class="card card-click" onclick='openViewer(${escAttr(JSON.stringify(m))})'>
+          <span style="font-size:11px;color:var(--muted);display:block;margin-bottom:10px;">${String(i+1).padStart(2,'0')}</span>
+          <h3>${esc(m.judul)}</h3><p>${esc(m.ringkas)}</p>
+          <span class="tag ${m.fileType==='pdf'?'':'blue'}" style="margin-top:10px;font-size:10px;">${m.fileType==='pdf'?'PDF':'Docs'}</span>
+        </div>`).join('')}</div>`);
   }catch(e){setContent(`<p style="color:red">${esc(e.message)}</p>`);}
 }
 
