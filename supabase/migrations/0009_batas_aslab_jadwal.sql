@@ -1,4 +1,4 @@
--- 0008_batas_aslab_jadwal.sql
+-- 0009_batas_aslab_jadwal.sql
 -- Batas maksimal 3 aslab per opsi jadwal (sesi) per tanggal + RPC katalog lintas-aslab.
 --
 -- === RINGKASAN INVESTIGASI (Task 0) ===
@@ -9,7 +9,7 @@
 -- Pemetaan kolom (placeholder -> nama asli):
 --   <KOLOM_OPSI>     = sesi    (slot waktu text, mis. '07.30-08.50'; opsi yang dipilih aslab)
 --   <KOLOM_TANGGAL>  = tanggal (date KALENDER NYATA -- bukan cuma hari-dalam-minggu.
---                       logic Jumat vs Senin-Kamis di getSesiOptions/script.js:1019-1023
+--                       logic Jumat vs Senin-Kamis di getSesiOptions/script.js lama
 --                       hanya UX sisi client untuk memilih DAFTAR opsi; di DB tersimpan
 --                       sebagai sesi text + tanggal date aktual.)
 --   <KOLOM_ASLAB_ID> = set_by  (username aslab yang set jadwal, dikirim form sebagai ses.username)
@@ -17,12 +17,12 @@
 --
 -- RLS schedules saat ini (0001:199-224): aslab hanya ALL untuk modul yang dipegang sendiri
 -- (cek via rotasi). Aslab TIDAK bisa SELECT jadwal milik aslab lain -> untuk hitung terisi
--- (Task 1b) dan katalog (Task 2) butuh akses baca lintas-aslab. Diselesaikan via RPC
+-- (Task C2) dan katalog (Task D) butuh akses baca lintas-aslab. Diselesaikan via RPC
 -- SECURITY DEFINER di bawah (least-privilege: hanya kolom tanggal/sesi/set_by/aslab_name),
 -- bukan SELECT policy yang membuka seluruh baris schedules.
 
 -- =============================================================================
--- 1a. TRIGGER: batas 3 aslab per (sesi, tanggal) — sumber kebenaran, anti race-condition
+-- C1. TRIGGER: batas 3 aslab per (sesi, tanggal) — sumber kebenaran, anti race-condition
 -- =============================================================================
 
 CREATE OR REPLACE FUNCTION public.cek_batas_aslab_jadwal()
@@ -60,13 +60,17 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
+-- Idempotent: DROP dulu sebelum CREATE (aman bila migrasi ini dijalankan ulang /
+-- setelah rename dari 0008 -> 0009 di lingkungan yang sudah pernah apply 0008 lama).
+DROP TRIGGER IF EXISTS trg_batas_aslab_jadwal ON public.schedules;
+
 CREATE TRIGGER trg_batas_aslab_jadwal
   BEFORE INSERT OR UPDATE ON public.schedules
   FOR EACH ROW EXECUTE FUNCTION public.cek_batas_aslab_jadwal();
 
 -- =============================================================================
--- 1c. RPC SECURITY DEFINER: katalog jadwal lintas-aslab (read-only, least-privilege)
--- Dipakai untuk: Task 1b (hitung terisi per slot -> indikator) & Task 2 (katalog).
+-- C3. RPC SECURITY DEFINER: katalog jadwal lintas-aslab (read-only, least-privilege)
+-- Dipakai untuk: Task C2 (hitung terisi per slot -> indikator) & Task D (katalog).
 -- Hanya mengekspos tanggal/sesi/set_by/aslab_name — bukan module_id/kelompok/updated_at.
 -- =============================================================================
 

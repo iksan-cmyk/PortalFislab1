@@ -345,7 +345,7 @@ async function apiSetSchedule(body) {
 }
 
 /* — getKatalogJadwal: ambil seluruh pilihan jadwal semua aslab (lintas-aslab) via RPC
-   SECURITY DEFINER katalog_jadwal_aslab (lihat 0008_batas_aslab_jadwal.sql).
+   SECURITY DEFINER katalog_jadwal_aslab (lihat 0009_batas_aslab_jadwal.sql).
    Dipakai untuk indikator terisi (Task 1b) & katalog read-only (Task 2).
    Mengembalikan { katalog: [{tanggal, sesi, set_by, aslab_name}] } urut tanggal DESC. — */
 async function apiGetKatalogJadwal() {
@@ -1030,16 +1030,13 @@ function renderAslab(hash,ses){const path=hash||'/a/jadwal';buildNav(NAV_A,path)
   switch(path){case'/a/katalog':loadKatalogA(ses);break;case'/a/nilai':loadNilaiA(ses);break;case'/a/modul':loadModulA(ses);break;case'/a/profil':loadProfilA(ses);break;default:loadJadwalA(ses);}
 }
 
-const SESI_SENIN_KAMIS = ['07.30-08.50','09.00-10.20','10.30-11.50','12.30-13.50','14.00-15.20','19.30-20.50','21.00-22.20'];
-const SESI_JUMAT       = ['07.00-08.20','08.20-09.40','09.40-11.00','13.00-14.20','14.30-15.50','19.30-20.50','21.00-22.20'];
-const MAX_ASLAB_PER_SLOT = 3; // batas trigger DB (0008_batas_aslab_jadwal.sql)
+const SESI = ['07.00-08.40','09.00-10.40','11.00-12.40','13.30-15.10','15.30-17.10','18.30-20.20'];
+const MAX_ASLAB_PER_SLOT = 3; // batas trigger DB (0009_batas_aslab_jadwal.sql)
 // _jadwalTerisi: Map "tanggal|sesi" -> jumlah aslab terisi (lintas-aslab, via RPC katalog_jadwal_aslab).
 // Diisi saat loadJadwalA; dipakai sesiOptionsHtml/updateSesiOptions untuk indikator "x/3" & "Penuh".
 window._jadwalTerisi = null;
 function getSesiOptions(tanggal){
-  if(!tanggal) return SESI_SENIN_KAMIS;
-  const day = new Date(tanggal+'T00:00:00').getDay(); // 0=Minggu...5=Jumat,6=Sabtu
-  return day===5 ? SESI_JUMAT : SESI_SENIN_KAMIS;
+  return SESI;
 }
 function terisiCount(tanggal, sesi){
   if(!window._jadwalTerisi || !tanggal) return 0;
@@ -1206,7 +1203,7 @@ async function loadKatalogA(ses){
     </p>
     ${tanggals.map(tgl=>{
       const bySesi = byTanggal.get(tgl);
-      const sesiList = [...bySesi.keys()];
+      const sesiList = SESI;
       return `<div class="card" style="margin-bottom:16px;">
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;">
           <h3 style="margin:0;font-size:16px;">${esc(fmtTgl(tgl))}</h3>
@@ -1215,7 +1212,7 @@ async function loadKatalogA(ses){
         <div class="tw"><table class="riwayat-table">
           <thead><tr><th>Sesi</th><th>Aslab pengambil slot</th><th style="text-align:right;">Terisi</th></tr></thead>
           <tbody>${sesiList.map(sesi=>{
-            const names = bySesi.get(sesi);
+            const names = bySesi.get(sesi) || [];
             const filled = names.length;
             const slots = names.slice();
             while (slots.length < MAX_ASLAB_PER_SLOT) slots.push(null);

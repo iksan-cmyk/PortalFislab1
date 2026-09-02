@@ -1,0 +1,30 @@
+-- 0008_reset_jadwal_sesi_unified.sql
+-- Reset seluruh pilihan jadwal aslab lama, karena slot waktu lama (SESI_SENIN_KAMIS/
+-- SESI_JUMAT) sama sekali TIDAK overlap dengan slot waktu baru (SESI 1-6).
+-- Seluruh aslab submit ulang dari nol pakai Sesi 1-6 setelah perubahan ini live.
+--
+-- === LAPORAN INVESTIGASI (Task 0) ===
+-- 1. Tabel pilihan jadwal aslab: public.schedules (0001_initial_schema.sql:46-55).
+--    Kolom: id, module_id, kelompok, tanggal date, sesi text, set_by text, updated_at.
+--    UNIQUE(module_id, kelompok).
+--    Pemetaan: <KOLOM_OPSI>=sesi, <KOLOM_TANGGAL>=tanggal, <KOLOM_ASLAB_ID>=set_by.
+-- 2. Slot sesi tersimpan sebagai TEKS (mis. '07.30-08.50'), bukan referensi index.
+--    tanggal adalah date KALENDER NYATA (bukan cuma hari-dalam-minggu).
+-- 3. Grep SESI_SENIN_KAMIS/SESI_JUMAT: hanya dipakai di script.js (sudah di-unifikasi
+--    jadi const SESI tunggal, percabangan hari dihapus). migrate.js memakai kolom
+--    sesi dari CSV, BUKAN konstanta tsb -> tidak perlu diubah.
+-- 4. FK ke public.schedules: TIDAK ADA. Tidak ada tabel lain (grades/modul/dst)
+--    yang punya foreign key ke schedules. grades hanya FK ke profiles + modules.
+--    -> DELETE FROM schedules AMAN, tidak ada referensi yang putus.
+-- 5. Restriksi hari: satu-satunya percabangan hari ada di getSesiOptions (script.js)
+--    yang sudah dihapus (sekarang return SESI untuk Senin s/d Minggu). <input type=date>
+--    tidak punya min/max/disable hari -> Sabtu/Minggu sudah bisa dipilih.
+--
+-- Catatan: sesi lama vs sesi baru TIDAK overlap, jadi baris lama tidak relevan lagi.
+-- Sebelum menjalankan ini di production, ambil backup data lama dulu:
+--   SELECT * FROM public.schedules;  -- export ke CSV / pg_dump tabel ini saja.
+--
+-- Scope HANYA tabel pilihan jadwal aslab. JANGAN sentuh tabel lain
+-- (users/profiles, grades, modules, rotasi, dst).
+
+DELETE FROM public.schedules;
