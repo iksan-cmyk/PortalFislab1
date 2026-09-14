@@ -52,6 +52,8 @@ async function api(action, body={}, useCache=false) {
     case 'setGrade':      data = await apiSetGrade(body); break;
     case 'deleteGrade':   data = await apiDeleteGrade(body); break;
     case 'getKatalogJadwal': data = await apiGetKatalogJadwal(); break;
+    case 'getRekapNilai': data = await apiGetRekapNilai(); break;
+    case 'getJadwalKelompokModul': data = await apiGetJadwalKelompokModul(); break;
     default: throw new Error('Unknown action: ' + action);
   }
   if (useCache) cacheSet(cacheKey, data);
@@ -315,8 +317,10 @@ async function apiGetRotasi(body) {
     kode: (r.modules && r.modules.kode) || '',
     judul: (r.modules && r.modules.judul) || '',
     judulPanjang: (r.modules && r.modules.judul) || '',
+    moduleId: (r.modules && r.modules.id) || null,
     kelompok: r.kelompok,
     minggu: r.minggu,
+    aslabUsername: r.aslab_username || null,
     aslab: r.aslab_username ? (nameMap.get(r.aslab_username) || null) : null,
   }))};
 }
@@ -356,6 +360,36 @@ async function apiGetKatalogJadwal() {
     sesi:       r.sesi,
     setBy:      r.set_by,
     aslabName:  r.aslab_name,
+  }))};
+}
+
+/* — getRekapNilai: ambil nilai_akhir SEMUA praktikan x SEMUA modul (lintas-aslab)
+   via RPC SECURITY DEFINER rekap_nilai_aslab (lihat 0010_rpc_rekap_nilai_aslab.sql).
+   Dipakai untuk tabel Rekap Nilai E1-E10 (Task A, RENCANA_PERUBAHAN_v5.md). — */
+async function apiGetRekapNilai() {
+  const { data, error } = await SB.rpc('rekap_nilai_aslab');
+  if (error) throw new Error(error.message);
+  return { rekap: (data || []).map(r => ({
+    username:   r.username,
+    moduleId:   r.module_id,
+    nilaiAkhir: r.nilai_akhir !== null ? String(r.nilai_akhir) : '',
+  }))};
+}
+
+/* — getJadwalKelompokModul: jadwal semua kelompok x semua modul (lintas-aslab)
+   via RPC SECURITY DEFINER jadwal_kelompok_modul (lihat
+   0011_rpc_jadwal_kelompok_modul.sql). Dipakai toggle "Per Kelompok" di
+   Katalog Jadwal (Task B, RENCANA_PERUBAHAN_v5.md). — */
+async function apiGetJadwalKelompokModul() {
+  const { data, error } = await SB.rpc('jadwal_kelompok_modul');
+  if (error) throw new Error(error.message);
+  return { jadwal: (data || []).map(r => ({
+    kelompok:  r.kelompok,
+    moduleId:  r.module_id,
+    tanggal:   r.tanggal,
+    sesi:      r.sesi,
+    setBy:     r.set_by,
+    aslabName: r.aslab_name,
   }))};
 }
 
@@ -1176,60 +1210,150 @@ async function hapusJadwal(kelompokId,judul,setBy){
 
 /* — Katalog Jadwal Praktikum (Task 2): tampil seluruh pilihan jadwal SEMUA aslab,
    read-only, group per tanggal (paling jauh di masa depan di atas). Akses baca lintas-aslab
-   via RPC katalog_jadwal_aslab yang sama dengan indikator Task 1b (jangan buat mekanisme terpisah). — */
+   via RPC katalog_jadwal_aslab yang sama dengan indikator Task 1b (jangan buat mekanisme terpisah).
+   Task B (RENCANA_PERUBAHAN_v5.md): tambah toggle "Per Tanggal" / "Per Kelompok".
+   Per Tanggal = logika lama, TIDAK diubah. Per Kelompok = 1 card per kelompok,
+   10 baris urut modul E1→E10. — */
 async function loadKatalogA(ses){
   setContent(loading());
   try{
-    const { katalog } = await api('getKatalogJadwal');
-    // group by tanggal (urut DESC dari RPC), lalu by sesi (urut ASC dari RPC).
-    // Map menjaga urutan insert -> tanggal & sesi tetap terurut sesuai hasil RPC.
-    const byTanggal = new Map();
-    for (const row of katalog) {
-      if (!byTanggal.has(row.tanggal)) byTanggal.set(row.tanggal, new Map());
-      const bySesi = byTanggal.get(row.tanggal);
-      if (!bySesi.has(row.sesi)) bySesi.set(row.sesi, []);
-      bySesi.get(row.sesi).push(row.aslabName || row.setBy || '(tanpa nama)');
-    }
-    const tanggals = [...byTanggal.keys()]; // sudah DESC (paling jauh di masa depan duluan)
-    if (!tanggals.length) {
-      setContent(`<div class="ph"><span class="ey">Katalog</span><h1>Katalog Jadwal Praktikum</h1></div>
-        <div class="card"><p style="color:var(--muted);">Belum ada jadwal yang diambil aslab mana pun.</p></div>`);
-      return;
-    }
+    // fetch sekali di awal — kedua tampilan pakai data yang sama sesi itu.
+    const [katalogRes, jadwalRes, rotasiRes, mods] = await Promise.all([
+      api('getKatalogJadwal'),
+      api('getJadwalKelompokModul'),
+      api('getRotasi', {}),
+      getMods(),
+    ]);
+    window._katalogData = {
+      katalog: katalogRes.katalog || [],
+      jadwal:  jadwalRes.jadwal  || [],
+      rotasi:  rotasiRes.rotasi  || [],
+      mods,
+    };
+    if (!window._katalogView) window._katalogView = 'tanggal';
+
     setContent(`
     <div class="ph"><span class="ey">Katalog</span><h1>Katalog Jadwal Praktikum</h1></div>
     <p style="margin-bottom:18px;font-size:13px;color:var(--muted);max-width:560px;line-height:1.65;">
       Daftar jadwal praktikum semua aslab — hanya lihat. Maksimal ${MAX_ASLAB_PER_SLOT} aslab per sesi per tanggal; slot yang masih kosong dapat diisi di halaman Jadwal.
     </p>
-    ${tanggals.map(tgl=>{
-      const bySesi = byTanggal.get(tgl);
-      const sesiList = SESI;
-      return `<div class="card" style="margin-bottom:16px;">
-        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;">
-          <h3 style="margin:0;font-size:16px;">${esc(fmtTgl(tgl))}</h3>
-          <span class="tag" style="font-size:11px;">${sesiList.length} sesi</span>
-        </div>
-        <div class="tw"><table class="riwayat-table">
-          <thead><tr><th>Sesi</th><th>Aslab pengambil slot</th><th style="text-align:right;">Terisi</th></tr></thead>
-          <tbody>${sesiList.map(sesi=>{
-            const names = bySesi.get(sesi) || [];
-            const filled = names.length;
-            const slots = names.slice();
-            while (slots.length < MAX_ASLAB_PER_SLOT) slots.push(null);
-            const tagsHtml = slots.map(n => n
-              ? `<span class="tag green" style="margin:2px 6px 2px 0;">${esc(n)}</span>`
-              : `<span class="tag" style="margin:2px 6px 2px 0;opacity:.55;">Kosong</span>`).join('');
-            const chipCls = filled >= MAX_ASLAB_PER_SLOT ? 'amber' : 'blue';
-            return `<tr>
-              <td style="font-weight:600;white-space:nowrap;">${esc(sesi)}</td>
-              <td>${tagsHtml}</td>
-              <td style="text-align:right;white-space:nowrap;"><span class="tag ${chipCls}" style="font-size:11px;">${filled}/${MAX_ASLAB_PER_SLOT}</span></td>
-            </tr>`;
-          }).join('')}</tbody>
-        </table></div>
-      </div>`;
-    }).join('')}`);
+    <div style="display:flex;gap:8px;margin-bottom:18px;">
+      <button type="button" class="btn btn-sm" id="katalog-tab-tanggal" onclick="setKatalogView('tanggal')">Per Tanggal</button>
+      <button type="button" class="btn btn-sm" id="katalog-tab-kelompok" onclick="setKatalogView('kelompok')">Per Kelompok</button>
+    </div>
+    <div id="katalog-content"></div>`);
+    renderKatalogContent();
   }catch(e){setContent(`<p style="color:red">${esc(e.message)}</p>`);}
+}
+
+function setKatalogView(v){
+  window._katalogView = v;
+  renderKatalogContent();
+}
+
+function renderKatalogContent(){
+  const wrap = document.getElementById('katalog-content');
+  if (!wrap) return;
+  const tabTgl = document.getElementById('katalog-tab-tanggal');
+  const tabKel = document.getElementById('katalog-tab-kelompok');
+  const activeStyle = 'background:var(--accent,#2563eb);color:#fff;border-color:var(--accent,#2563eb);';
+  if (tabTgl) tabTgl.setAttribute('style', window._katalogView === 'tanggal' ? 'font-size:12px;padding:6px 14px;'+activeStyle : 'font-size:12px;padding:6px 14px;');
+  if (tabKel) tabKel.setAttribute('style', window._katalogView === 'kelompok' ? 'font-size:12px;padding:6px 14px;'+activeStyle : 'font-size:12px;padding:6px 14px;');
+
+  if (window._katalogView === 'kelompok') {
+    wrap.innerHTML = renderKatalogKelompok();
+  } else {
+    wrap.innerHTML = renderKatalogTanggal();
+  }
+}
+
+/* — Per Tanggal: SAMA PERSIS seperti kode loadKatalogA lama — hanya dipindah
+   ke fungsi terpisah, logika/output tidak diubah. — */
+function renderKatalogTanggal(){
+  const { katalog } = window._katalogData || {};
+  // group by tanggal (urut DESC dari RPC), lalu by sesi (urut ASC dari RPC).
+  const byTanggal = new Map();
+  for (const row of (katalog || [])) {
+    if (!byTanggal.has(row.tanggal)) byTanggal.set(row.tanggal, new Map());
+    const bySesi = byTanggal.get(row.tanggal);
+    if (!bySesi.has(row.sesi)) bySesi.set(row.sesi, []);
+    bySesi.get(row.sesi).push(row.aslabName || row.setBy || '(tanpa nama)');
+  }
+  const tanggals = [...byTanggal.keys()]; // sudah DESC (paling jauh di masa depan duluan)
+  if (!tanggals.length) {
+    return `<div class="card"><p style="color:var(--muted);">Belum ada jadwal yang diambil aslab mana pun.</p></div>`;
+  }
+  return tanggals.map(tgl => {
+    const bySesi = byTanggal.get(tgl);
+    const sesiList = SESI;
+    return `<div class="card" style="margin-bottom:16px;">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;">
+        <h3 style="margin:0;font-size:16px;">${esc(fmtTgl(tgl))}</h3>
+        <span class="tag" style="font-size:11px;">${sesiList.length} sesi</span>
+      </div>
+      <div class="tw"><table class="riwayat-table">
+        <thead><tr><th>Sesi</th><th>Aslab pengambil slot</th><th style="text-align:right;">Terisi</th></tr></thead>
+        <tbody>${sesiList.map(sesi => {
+          const names = bySesi.get(sesi) || [];
+          const filled = names.length;
+          const slots = names.slice();
+          while (slots.length < MAX_ASLAB_PER_SLOT) slots.push(null);
+          const tagsHtml = slots.map(n => n
+            ? `<span class="tag green" style="margin:2px 6px 2px 0;">${esc(n)}</span>`
+            : `<span class="tag" style="margin:2px 6px 2px 0;opacity:.55;">Kosong</span>`).join('');
+          const chipCls = filled >= MAX_ASLAB_PER_SLOT ? 'amber' : 'blue';
+          return `<tr>
+            <td style="font-weight:600;white-space:nowrap;">${esc(sesi)}</td>
+            <td>${tagsHtml}</td>
+            <td style="text-align:right;white-space:nowrap;"><span class="tag ${chipCls}" style="font-size:11px;">${filled}/${MAX_ASLAB_PER_SLOT}</span></td>
+          </tr>`;
+        }).join('')}</tbody>
+      </table></div>
+    </div>`;
+  }).join('');
+}
+
+/* — Per Kelompok (baru): 1 card per kelompok (urut ascending), isi = tabel 10
+   baris urut modul E1→E10 (urutan dari array mods). Kolom: Modul (kode+judul) |
+   Aslab pemegang (dari rotasi) | Tanggal & Sesi (dari RPC jadwal_kelompok_modul,
+   atau "Belum dijadwalkan"). — */
+function renderKatalogKelompok(){
+  const { jadwal, rotasi, mods } = window._katalogData || {};
+  const m = mods || [];
+  // kelompok unik dari rotasi (sumber kebenaran kelompok×modul)
+  const kelompoks = [...new Set((rotasi || []).map(r => r.kelompok))].sort((a,b) => +a - +b);
+  if (!kelompoks.length) {
+    return `<div class="card"><p style="color:var(--muted);">Belum ada data rotasi kelompok.</p></div>`;
+  }
+  // lookup jadwal: key "kelompok|moduleId" -> {tanggal, sesi}
+  const jadwalMap = new Map();
+  for (const j of (jadwal || [])) jadwalMap.set(j.kelompok + '|' + j.moduleId, j);
+  return kelompoks.map(k => {
+    const rows = m.map(mod => {
+      // aslab pemegang kelompok+modul ini (dari rotasi)
+      const r = (rotasi || []).find(x => +x.kelompok === +k && x.moduleId === mod.id);
+      const aslabTxt = r && r.aslab ? esc(r.aslab) : '—';
+      const j = jadwalMap.get(k + '|' + mod.id);
+      const tglSesi = j
+        ? `${esc(fmtTgl(j.tanggal))} · ${esc(j.sesi)}`
+        : `<span style="color:var(--muted);">Belum dijadwalkan</span>`;
+      return `<tr>
+        <td><span class="tag blue" style="font-size:10px;margin-right:6px;">${esc(mod.kode)}</span>${esc(mod.judul)}</td>
+        <td>${aslabTxt}</td>
+        <td>${tglSesi}</td>
+      </tr>`;
+    }).join('');
+    return `<div class="card" style="margin-bottom:16px;">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;">
+        <h3 style="margin:0;font-size:16px;">Kelompok ${esc(k)}</h3>
+        <span class="tag" style="font-size:11px;">${m.length} modul</span>
+      </div>
+      <div class="tw"><table class="riwayat-table">
+        <thead><tr><th>Modul</th><th>Aslab pemegang</th><th>Tanggal &amp; Sesi</th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table></div>
+    </div>`;
+  }).join('');
 }
 
 /* — Modul Praktikum (aslab): daftar modul sama seperti halaman praktikan, read-only,
@@ -1275,37 +1399,121 @@ async function loadNilaiA(ses){
     <div id="a-grade-wrap"></div>
     <div id="a-riwayat-wrap"></div>`);
 
-    // load riwayat semua modul sekaligus
-    const judulList = myMods.map(m => m.judul);
-    const allGrades = await Promise.all(judulList.map(j => api('getGrades',{judul:j}).then(r=>r.grades)));
-    const semua = allGrades.flat().filter(g => g.nilaiAkhir !== '');
-    const wrap = document.getElementById('a-riwayat-wrap');
-    if (semua.length > 0) {
-      wrap.innerHTML = `
-      <div class="ph" style="margin-top:32px;"><span class="ey">Riwayat</span><h1>Sudah Dinilai</h1></div>
-      <div class="tw"><table class="riwayat-table">
-        <thead><tr><th>Nama</th><th>Modul</th><th>Kelompok</th><th>Total Akhir</th><th>Diinput</th><th>Aksi</th></tr></thead>
-        <tbody>${semua.map(g=>{
-          const u=(users||[]).find(x=>x.username===g.username);
-          const mod=myMods.find(m=>m.judul===g.judul);
-          return`<tr>
-            <td>${u?esc(u.name):esc(g.username)}</td>
-            <td>${mod?`<span class="tag blue" style="font-size:10px;">${esc(mod.kode)}</span>`:esc(g.judul)}</td>
-            <td>${u?esc(u.kelompok):'—'}</td>
-            <td><span class="score-chip ${scoreClass(g.nilaiAkhir)}">${parseFloat(g.nilaiAkhir).toFixed(2)}</span></td>
-            <td style="font-size:12px;color:var(--muted);">${g.updatedAt?new Date(g.updatedAt).toLocaleString('id-ID',{day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit'}):'-'}</td>
-            <td><button type="button" class="btn btn-sm btn-danger" onclick="batalNilai('${escAttr(g.username)}','${escAttr(g.judul)}')">Batal</button></td>
-          </tr>`;}).join('')}
-        </tbody></table></div>`;
-    }
+    // Rekap Nilai E1-E10 (menggantikan riwayat lama — RENCANA_PERUBAHAN_v5.md Task A, Opsi a).
+    await renderRekapNilai(mods, users, rotasi, ses);
   }catch(e){setContent(`<p style="color:red">${esc(e.message)}</p>`);}
+}
+
+/* — renderRekapNilai: tabel rekap nilai_akhir SEMUA praktikan x SEMUA modul E1-E10.
+   Baris = praktikan (urut NRP naik), kolom = modul urut sesuai modules.urutan.
+   Filter: dropdown Kelompok + input Nama + input NRP (AND, client-side).
+   Tombol Hapus per sel HANYA muncul kalau aslab yang login memegang
+   (module_id + kelompok praktikan) menurut rotasi (Opsi ii — cek ketat). — */
+async function renderRekapNilai(mods, users, rotasi, ses){
+  const wrap = document.getElementById('a-riwayat-wrap');
+  if (!wrap) return;
+  let rekap = [];
+  try {
+    const r = await api('getRekapNilai');
+    rekap = r.rekap || [];
+  } catch(e) { /* biarkan rekap kosong, tabel tetap tampil */ }
+  // state di window supaya fungsi filter & refresh bisa akses tanpa refetch
+  window._rekapState = { mods, users, rotasi, ses, rekap };
+  const praktikan = (users||[]).filter(u => u.role === 'praktikan');
+  // sort NRP ascending numerik (NRP asli = 10 digit angka, verifikasi data users.csv)
+  praktikan.sort((a,b) => (parseInt(a.nrp||'0',10)||0) - (parseInt(b.nrp||'0',10)||0));
+  window._rekapState.praktikan = praktikan;
+  // opsi kelompok unik
+  const kelompokSet = [...new Set(praktikan.map(u => u.kelompok).filter(k => k !== undefined && k !== null && k !== ''))];
+  kelompokSet.sort((a,b) => +a - +b);
+
+  wrap.innerHTML = `
+    <div class="ph" style="margin-top:32px;"><span class="ey">Riwayat</span><h1>Rekap Nilai E1–E10</h1></div>
+    <div class="fr" style="max-width:900px;margin-bottom:18px;">
+      <div class="ff"><label>Kelompok</label>
+        <select id="rek-grp" onchange="applyRekapFilters()">
+          <option value="">Semua Kelompok</option>
+          ${kelompokSet.map(k=>`<option value="${esc(k)}">Kelompok ${esc(k)}</option>`).join('')}
+        </select></div>
+      <div class="ff"><label>Nama</label>
+        <input type="text" id="rek-nama" placeholder="Cari nama…" oninput="applyRekapFilters()"></div>
+      <div class="ff"><label>NRP</label>
+        <input type="text" id="rek-nrp" placeholder="Cari NRP…" oninput="applyRekapFilters()"></div>
+    </div>
+    <div class="tw" id="rek-table-wrap">${rekapTableHtml()}</div>`;
+}
+
+function rekapTableHtml(){
+  const st = window._rekapState; if (!st) return '';
+  const { mods, rotasi, ses } = st;
+  let praktikan = (st.praktikan||[]).slice();
+  // baca filter
+  const fGrp = (document.getElementById('rek-grp')||{}).value || '';
+  const fNama = ((document.getElementById('rek-nama')||{}).value || '').toLowerCase().trim();
+  const fNrp  = ((document.getElementById('rek-nrp')||{}).value  || '').toLowerCase().trim();
+  if (fGrp) praktikan = praktikan.filter(u => String(u.kelompok) === String(fGrp));
+  if (fNama) praktikan = praktikan.filter(u => (u.name||'').toLowerCase().includes(fNama));
+  if (fNrp)  praktikan = praktikan.filter(u => String(u.nrp||'').toLowerCase().includes(fNrp));
+
+  // lookup nilai: key "username|moduleId" -> nilaiAkhir
+  const nilaiMap = new Map();
+  for (const r of (st.rekap||[])) nilaiMap.set(r.username + '|' + r.moduleId, r.nilaiAkhir);
+
+  // header: Nama | NRP | Kelompok | 1 kolom per modul (kode)
+  const header = `<thead><tr>
+    <th>Nama</th><th>NRP</th><th>Kelompok</th>
+    ${mods.map(m => `<th>${esc(m.kode)}</th>`).join('')}
+  </tr></thead>`;
+
+  const body = praktikan.map(u => {
+    const cells = mods.map(m => {
+      const val = nilaiMap.get(u.username + '|' + m.id);
+      if (val === undefined || val === '' || val === null) return `<td>—</td>`;
+      // cek kepemilikan: apakah aslab yang login memegang (module_id + kelompok) ini?
+      const mine = rotasi.some(r =>
+        r.moduleId === m.id &&
+        +r.kelompok === +u.kelompok &&
+        r.aslabUsername === ses.username);
+      const chip = `<span class="score-chip ${scoreClass(val)}">${parseFloat(val).toFixed(2)}</span>`;
+      if (!mine) return `<td>${chip}</td>`;
+      return `<td>${chip} <button type="button" class="btn btn-sm btn-danger" style="margin-left:4px;padding:0 8px;font-size:11px;" title="Batalkan nilai ${esc(m.kode)}" onclick="batalNilai('${escAttr(u.username)}','${escAttr(m.judul)}')">✕</button></td>`;
+    }).join('');
+    return `<tr>
+      <td>${esc(u.name)}</td>
+      <td>${esc(u.nrp||'—')}</td>
+      <td>${u.kelompok !== undefined && u.kelompok !== null ? esc(u.kelompok) : '—'}</td>
+      ${cells}
+    </tr>`;
+  }).join('');
+
+  if (!praktikan.length) {
+    return `<table class="riwayat-table">${header}<tbody><tr><td colspan="${3 + mods.length}" style="text-align:center;color:var(--muted);padding:24px;">Tidak ada praktikan yang cocok dengan filter.</td></tr></tbody></table>`;
+  }
+  return `<table class="riwayat-table">${header}<tbody>${body}</tbody></table>`;
+}
+
+function applyRekapFilters(){
+  const w = document.getElementById('rek-table-wrap'); if (!w) return;
+  w.innerHTML = rekapTableHtml();
+}
+
+/* — refreshRekapNilai: re-fetch data rekap & re-render tabel (dipakai setelah
+   submit/batal nilai). Filter state (kelompok/nama/nrp) dipertahankan. — */
+async function refreshRekapNilai(){
+  const st = window._rekapState; if (!st) return;
+  try {
+    const r = await api('getRekapNilai');
+    st.rekap = r.rekap || [];
+  } catch(e) { /* keep existing */ }
+  applyRekapFilters();
 }
 
 function aModChange(sel){
   const grp=document.getElementById('a-grp-sel');
   const stu=document.getElementById('a-stu-sel');
   document.getElementById('a-grade-wrap').innerHTML='';
-  document.getElementById('a-riwayat-wrap').innerHTML='';
+  // Rekap E1-E10 (pengganti riwayat lama) tetap tampil di a-riwayat-wrap
+  // saat modul dipilih — jangan dikosongkan.
   if(!sel.value){
     grp.disabled=true;grp.innerHTML='<option>Pilih modul dahulu</option>';
     stu.disabled=true;stu.innerHTML='<option>Pilih kelompok dahulu</option>';
@@ -1322,32 +1530,6 @@ function aModChange(sel){
     kelompoks.map(g=>`<option value="${g}">Kelompok ${g}</option>`).join('');
   stu.disabled=true;
   stu.innerHTML='<option>Pilih kelompok dahulu</option>';
-
-  // tampilkan riwayat
-  loadRiwayatNilai(sel.value);
-}
-
-async function loadRiwayatNilai(judul){
-  const wrap=document.getElementById('a-riwayat-wrap');
-  try{
-    const{grades}=await api('getGrades',{judul});
-    const done=grades.filter(g=>g.nilaiAkhir!=='');
-    if(!done.length){wrap.innerHTML='';return;}
-    wrap.innerHTML=`
-    <div class="ph" style="margin-top:32px;"><span class="ey">Riwayat</span><h1>Sudah Dinilai</h1></div>
-    <div class="tw"><table class="riwayat-table">
-      <thead><tr><th>Nama</th><th>Kelompok</th><th>Total Akhir</th><th>Diinput</th><th>Aksi</th></tr></thead>
-      <tbody>${done.map(g=>{
-        const u=(window._aUsers||[]).find(x=>x.username===g.username);
-        return`<tr>
-          <td>${u?esc(u.name):esc(g.username)}</td>
-          <td>${u?esc(u.kelompok):'—'}</td>
-          <td><span class="score-chip ${scoreClass(g.nilaiAkhir)}">${parseFloat(g.nilaiAkhir).toFixed(2)}</span></td>
-          <td style="font-size:12px;color:var(--muted);">${g.updatedAt?new Date(g.updatedAt).toLocaleString('id-ID',{day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit'}):'-'}</td>
-          <td><button type="button" class="btn btn-sm btn-danger" onclick="batalNilai('${escAttr(g.username)}','${escAttr(judul)}')">Batal</button></td>
-        </tr>`;}).join('')}
-      </tbody></table></div>`;
-  }catch(_){wrap.innerHTML='';}
 }
 
 function aGrpChange(sel){
@@ -1409,8 +1591,8 @@ async function submitNilaiA(e,username,judul,setBy){
     await api('setGrade',body);
     CACHE={};APP.grades=null;
     toast('Nilai & catatan tersimpan.');
-    // refresh riwayat
-    loadRiwayatNilai(judul);
+    // refresh rekap E1-E10 (pengganti riwayat per-modul lama)
+    refreshRekapNilai();
   }catch(err){toast('Gagal: '+err.message);}
   finally{btn.disabled=false;btn.innerHTML='Simpan Nilai & Catatan';}
 }
@@ -1421,7 +1603,10 @@ async function batalNilai(username, judul){
     await api('deleteGrade',{username,judul});
     CACHE={};APP.grades=null;
     toast('Nilai dibatalkan.');
-    if (window._aSes) loadNilaiA(window._aSes);
+    // refresh rekap E1-E10 jika sedang tampil (pengganti riwayat lama).
+    // Kalau _rekapState tidak ada (konteks lain), fallback ke loadNilaiA penuh.
+    if (window._rekapState) refreshRekapNilai();
+    else if (window._aSes) loadNilaiA(window._aSes);
   }catch(err){toast('Gagal: '+err.message);}
 }
 

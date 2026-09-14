@@ -23,3 +23,5 @@ dist/
 # File konfigurasi internal agent - jangan pernah commit (dihapus dari histori git).
 AGENTS.md
 RENCANA_PERUBAHAN_v4.md
+RENCANA_PERUBAHAN_v5.md
+RENCANA_PERUBAHAN_v6.md
