@@ -1809,3 +1809,24 @@ html.dark .modal {
     display: none !important; 
   }
 }
+
+/* === EASTER EGG: efek gravitasi sidebar (Fitur 3, RENCANA_PERUBAHAN_v8.md) ===
+   Dipicu setelah 7 klik pada item sidebar abu-abu (tidak aktif). Elemen jatuh
+   ke bawah viewport, tetap di posisi jatuh (tidak auto-reset). Navigasi asli
+   tetap berfungsi (pointer-events tidak di-disable). Transform murni via
+   @keyframes -> tidak menggeser layout atau memicu scroll horizontal. */
+@keyframes gravityFall {
+  0%   { transform: translateY(0) rotate(0deg); opacity: 1; }
+  62%  { transform: translateY(78vh) rotate(9deg); opacity: .85; }
+  76%  { transform: translateY(72vh) rotate(4deg); opacity: .85; }
+  88%  { transform: translateY(80vh) rotate(8deg); opacity: .8; }
+  100% { transform: translateY(80vh) rotate(6deg); opacity: .78; }
+}
+.sb-link.gravity-falling {
+  animation: gravityFall 1.15s cubic-bezier(.5,.05,.7,.2) forwards;
+  will-change: transform, opacity;
+}
+.sb-link.gravity-fallen {
+  transform: translateY(80vh) rotate(6deg);
+  opacity: .78;
+}

@@ -54,6 +54,8 @@ async function api(action, body={}, useCache=false) {
     case 'getKatalogJadwal': data = await apiGetKatalogJadwal(); break;
     case 'getRekapNilai': data = await apiGetRekapNilai(); break;
     case 'getJadwalKelompokModul': data = await apiGetJadwalKelompokModul(); break;
+    case 'getAdminJadwal':  data = await apiGetAdminJadwal(body); break;
+    case 'adminHapusJadwal': data = await apiAdminHapusJadwal(body); break;
     default: throw new Error('Unknown action: ' + action);
   }
   if (useCache) cacheSet(cacheKey, data);
@@ -393,6 +395,48 @@ async function apiGetJadwalKelompokModul() {
   }))};
 }
 
+/* — getAdminJadwal: SEMUA jadwal lintas kelompok/modul/tanggal (admin only,
+   RLS sched_admin_all mengizinkan baca semua baris). Output menyertakan
+   module_id + kode + judul + aslab pemegang slot (set_by + name) untuk
+   halaman Jadwal admin (Fitur 1, RENCANA_PERUBAHAN_v8.md). — */
+async function apiGetAdminJadwal() {
+  const { data: sched, error } = await SB.from('schedules')
+    .select('module_id, kelompok, tanggal, sesi, set_by, updated_at, modules:module_id(judul,kode)')
+    .order('tanggal', { ascending: true })
+    .order('sesi', { ascending: true });
+  if (error) throw new Error(error.message);
+  const aslabUsernames = [...new Set((sched || []).map(s => s.set_by).filter(Boolean))];
+  let nameMap = new Map();
+  if (aslabUsernames.length) {
+    const { data: aslabs } = await SB.from('profiles')
+      .select('username,name').in('username', aslabUsernames);
+    for (const a of (aslabs || [])) nameMap.set(a.username, a.name);
+  }
+  return { jadwal: (sched || []).map(s => ({
+    moduleId: s.module_id,
+    judul: (s.modules && s.modules.judul) || s.module_id,
+    kode: (s.modules && s.modules.kode) || '',
+    kelompok: s.kelompok,
+    tanggal: s.tanggal,
+    sesi: s.sesi,
+    setBy: s.set_by,
+    aslabName: s.set_by ? (nameMap.get(s.set_by) || s.set_by) : '—',
+    updatedAt: s.updated_at,
+  }))};
+}
+
+/* — adminHapusJadwal: body {moduleId, kelompok}. Hapus jadwal + nilai terkait
+   atomik via RPC SECURITY DEFINER admin_hapus_jadwal (lihat
+   0012_admin_full_power_nilai_jadwal.sql). Dipakai halaman Jadwal admin. — */
+async function apiAdminHapusJadwal(body) {
+  const { error } = await SB.rpc('admin_hapus_jadwal', {
+    p_module_id: body.moduleId,
+    p_kelompok: parseInt(body.kelompok, 10),
+  });
+  if (error) throw new Error(error.message);
+  return { success: true };
+}
+
 /* — setGrade: body {username, judul, setBy, 10 komponen, 10 catatan, nilaiAkhir(ignored)}.
    nilai_akhir dihitung ulang oleh trigger recompute_nilai_akhir di server. — */
 async function apiSetGrade(body) {
@@ -721,6 +765,7 @@ function renderApp() {
   if(ses.role==='praktikan') renderPraktikan(hash,ses);
   else if(ses.role==='aslab') renderAslab(hash,ses);
   else renderAdmin(hash,ses);
+  gravityEggRestoreFallen();
 }
 function toggleSidebar() {
   const sb = document.getElementById('sidebar');
@@ -1611,11 +1656,14 @@ async function batalNilai(username, judul){
 }
 
 /*admin anjy*/
-const NAV_AD=[{path:'/ad/nilai',label:'Nilai',icon:'nilai'},{path:'/ad/pengguna',label:'Profil',icon:'profil'}];
-function renderAdmin(hash,ses){const path=hash||'/ad/nilai';buildNav(NAV_AD,path);
-  path==='/ad/pengguna'?loadAdminPengguna(ses):loadAdminNilai();}
-async function loadAdminNilai(){
+const NAV_AD=[{path:'/ad/jadwal',label:'Jadwal',icon:'jadwal'},{path:'/ad/nilai',label:'Nilai',icon:'nilai'},{path:'/ad/pengguna',label:'Profil',icon:'profil'}];
+function renderAdmin(hash,ses){const path=hash||'/ad/jadwal';buildNav(NAV_AD,path);
+  if(path==='/ad/pengguna')loadAdminPengguna(ses);
+  else if(path==='/ad/nilai')loadAdminNilai(ses);
+  else loadAdminJadwal(ses);}
+async function loadAdminNilai(ses){
   setContent(loading());
+  window._adSes = ses;
   try{
     const{users}=await api('getUsers', {}, true);window._adUsers=users;
     const kelompoks=[...new Set(users.filter(u=>u.role==='praktikan').map(u=>u.kelompok))].sort((a,b)=>+a-+b);
@@ -1623,7 +1671,7 @@ async function loadAdminNilai(){
     <div class="ph">
       <span class="ey">Administrasi</span>
       <h1>Rekap Nilai</h1>
-      <p>Pilih kelompok lalu pilih praktikan.</p>
+      <p>Pilih kelompok lalu pilih praktikan. Admin dapat melihat, menginput, dan menghapus nilai untuk kombinasi modul + praktikan apa pun.</p>
     </div>
     <div class="fr" style="max-width:600px;margin-bottom:22px;">
       <div class="ff">
@@ -1653,19 +1701,269 @@ async function adStuChange(sel){
   wrap.innerHTML=loading();
   try{
     const[mods,{grades}]=await Promise.all([getMods(),api('getGrades',{username:sel.value}, true)]);
+    window._adGradesMods=mods;window._adGrades=grades;window._adStuUsername=sel.value;
     const u=(window._adUsers||[]).find(x=>x.username===sel.value);
     wrap.innerHTML=`
+    <div class="ph" style="margin-top:8px;"><span class="ey">Breakdown</span><h1>Nilai ${u?esc(u.name):esc(sel.value)}</h1></div>
     <div class="tw">
       <table>
-      <thead><tr><th>Judul</th>${KOMP.map(k=>`<th>${k.label}<br><small style="font-weight:400;color:var(--muted)">${k.bobot}%</small></th>`).join('')}<th>Total</th></tr></thead>
-      <tbody>${mods.map(m=>{const g=grades.find(x=>x.judul===m.id||x.judul===m.judul)||{};const total=g.nilaiAkhir||hitungTotal(g)||null;
+      <thead><tr><th>Judul</th>${KOMP.map(k=>`<th>${k.label}<br><small style="font-weight:400;color:var(--muted)">${k.bobot}%</small></th>`).join('')}<th>Total</th><th>Aksi</th></tr></thead>
+      <tbody>${mods.map(m=>{const g=grades.find(x=>x.judul===m.id||x.judul===m.judul)||{};const total=g.nilaiAkhir||hitungTotal(g)||null;const hasNilai=!!total||KOMP.some(k=>g[k.key]!==undefined&&g[k.key]!=='');
         return`<tr><td style="font-weight:500">${esc(m.judul)}</td>
           ${KOMP.map(k=>`<td>${g[k.key]!==undefined&&g[k.key]!==''?g[k.key]:'—'}</td>`).join('')}
           <td>${total?`<span class="score-chip ${scoreClass(total)}">${parseFloat(total).toFixed(2)}</span>`:'—'}</td>
+          <td style="white-space:nowrap;">
+            <button type="button" class="btn btn-sm btn-primary" style="padding:0 10px;font-size:11px;" onclick="openAdminNilaiForm('${escAttr(sel.value)}','${escAttr(m.judul)}')">Edit</button>
+            ${hasNilai?`<button type="button" class="btn btn-sm btn-danger" style="margin-left:4px;padding:0 8px;font-size:11px;" onclick="hapusAdminNilai('${escAttr(sel.value)}','${escAttr(m.judul)}')">Hapus</button>`:''}
+          </td>
         </tr>`;}).join('')}
-      </tbody></table></div>`;
+      </tbody></table></div>
+      <p style="margin-top:14px;font-size:12px;color:var(--muted);">Klik <b>Edit</b> untuk input/mengubah nilai modul mana pun. <b>Hapus</b> menghapus seluruh nilai + catatan untuk modul tersebut.</p>`;
   }catch(err){wrap.innerHTML=`<p style="color:red">${esc(err.message)}</p>`;}
 }
+
+/* — openAdminNilaiForm: modal form input nilai (admin, full power untuk
+   kombinasi praktikan+modul apa pun). Reuse pola form aslab (aStuChange),
+   nilaiAkhir dihitung trigger di server. — */
+function openAdminNilaiForm(username, judul){
+  const setBy = (window._adSes && window._adSes.username) || 'admin';
+  const g=(window._adGrades||[]).find(x=>x.judul===judul&&(x.username===username))||{};
+  const u=(window._adUsers||[]).find(x=>x.username===username);
+  const total=hitungTotal(g);
+  document.getElementById('modal-root').innerHTML=`
+  <div class="modal-back" id="anf-back">
+    <div class="modal" style="max-width:860px;">
+      <button class="modal-close" onclick="closeModal()">✕</button>
+      <h3>Input Nilai — ${u?esc(u.name):esc(username)}</h3>
+      <p style="font-size:13px;color:var(--muted);margin-bottom:18px;">${esc(judul)}</p>
+      <form onsubmit="submitAdminNilai(event,'${escAttr(username)}','${escAttr(judul)}','${escAttr(setBy)}')">
+        <div class="total-preview">
+          <div class="label">Total Akhir (auto-hitung server)</div>
+          <div class="score" id="anf-total">${total?total.toFixed(2):'—'}</div>
+        </div>
+        <div class="nform-grid">
+          ${KOMP.map(k=>`
+          <div class="nform-row">
+            <div class="nform-label"><b>${k.label}</b><span>Bobot ${k.bobot}%</span></div>
+            <div class="nform-num"><input type="number" name="${k.key}" min="0" max="100"
+              value="${g[k.key]||''}" placeholder="—" oninput="updateAdminTotal(this.form)"></div>
+            <div class="nform-cat"><textarea name="${k.cat}" placeholder="Catatan…" rows="1">${esc(g[k.cat]||'')}</textarea></div>
+          </div>`).join('')}
+        </div>
+        <button type="submit" class="btn btn-primary" id="anf-save" style="width:100%;height:50px;font-size:15px;">Simpan Nilai &amp; Catatan</button>
+      </form>
+    </div>
+  </div>`;
+  document.getElementById('anf-back').onclick=e=>{if(e.target.id==='anf-back')closeModal();};
+}
+function updateAdminTotal(form){
+  const fd=new FormData(form);let total=0;
+  KOMP.forEach(k=>{const v=parseFloat(fd.get(k.key));if(!isNaN(v)&&k.bobot>0)total+=v*(k.bobot/100);});
+  document.getElementById('anf-total').textContent=(Math.round(total*100)/100).toFixed(2);
+}
+async function submitAdminNilai(e,username,judul,setBy){
+  e.preventDefault();const fd=new FormData(e.target);
+  const btn=document.getElementById('anf-save');btn.disabled=true;btn.innerHTML='<span class="spinner"></span> Menyimpan…';
+  const body={username,judul,setBy};
+  KOMP.forEach(k=>{body[k.key]=fd.get(k.key)||'';body[k.cat]=fd.get(k.cat)||'';});
+  try{
+    await api('setGrade',body);
+    CACHE={};
+    toast('Nilai & catatan tersimpan.');
+    closeModal();
+    // refresh tabel breakdown
+    const sel=document.getElementById('ad-stu-sel');if(sel&&sel.value)adStuChange(sel);
+  }catch(err){toast('Gagal: '+err.message);btn.disabled=false;btn.innerHTML='Simpan Nilai & Catatan';}
+}
+async function hapusAdminNilai(username, judul){
+  if(!confirm(`Hapus nilai & catatan "${judul}" untuk praktikan ini? Tidak bisa dikembalikan.`))return;
+  try{
+    await api('deleteGrade',{username,judul});
+    CACHE={};
+    toast('Nilai dihapus.');
+    const sel=document.getElementById('ad-stu-sel');if(sel&&sel.value)adStuChange(sel);
+  }catch(err){toast('Gagal: '+err.message);}
+}
+/* — Halaman Jadwal admin (Fitur 1, RENCANA_PERUBAHAN_v8.md).
+   Admin bisa: lihat seluruh jadwal lintas kelompok/modul/tanggal + aslab
+   pemegang slot, filter (kelompok/modul/tanggal/aslab), edit (aslab pemegang
+   slot + tanggal/sesi), dan hapus (dengan cascade delete nilai terkait via
+   RPC admin_hapus_jadwal, plus modal konfirmasi eksplisit).
+   Trigger cek_batas_aslab_jadwal (0009) tetap berlaku saat edit. — */
+async function loadAdminJadwal(ses){
+  setContent(loading('Memuat jadwal…'));
+  try{
+    const [{jadwal}, mods, aslabs] = await Promise.all([
+      api('getAdminJadwal'),
+      getMods(),
+      api('getUsers', {}, true).then(r => (r.users||[]).filter(u => u.role === 'aslab')),
+    ]);
+    window._adJadwalState = { jadwal, mods, aslabs, ses };
+    const kelompokSet = [...new Set(jadwal.map(j => j.kelompok))].sort((a,b)=>+a-+b);
+    setContent(`
+    <div class="ph">
+      <span class="ey">Administrasi</span>
+      <h1>Jadwal Praktikum</h1>
+      <p>Seluruh jadwal lintas kelompok &amp; modul. Admin dapat mengubah dan menghapus jadwal.</p>
+    </div>
+    <div class="fr" style="margin-bottom:16px;align-items:flex-end;">
+      <div class="ff"><label>Kelompok</label>
+        <select id="aj-grp" onchange="renderAdminJadwalTable()">
+          <option value="">Semua</option>${kelompokSet.map(k=>`<option value="${esc(k)}">Kelompok ${esc(k)}</option>`).join('')}
+        </select></div>
+      <div class="ff"><label>Modul</label>
+        <select id="aj-mod" onchange="renderAdminJadwalTable()">
+          <option value="">Semua</option>${mods.map(m=>`<option value="${esc(m.id)}">${esc(m.kode||'')} — ${esc(m.judul)}</option>`).join('')}
+        </select></div>
+      <div class="ff"><label>Aslab</label>
+        <select id="aj-aslab" onchange="renderAdminJadwalTable()">
+          <option value="">Semua</option>${aslabs.map(a=>`<option value="${esc(a.username)}">${esc(a.name)}</option>`).join('')}
+        </select></div>
+    </div>
+    <div class="fr" style="margin-bottom:22px;align-items:flex-end;">
+      <div class="ff"><label>Tanggal dari</label>
+        <input type="date" id="aj-dari" onchange="renderAdminJadwalTable()"></div>
+      <div class="ff"><label>Tanggal sampai</label>
+        <input type="date" id="aj-sampai" onchange="renderAdminJadwalTable()"></div>
+    </div>
+    <div id="aj-table-wrap"></div>`);
+    renderAdminJadwalTable();
+  }catch(e){setContent(`<p style="color:red">${esc(e.message)}</p>`);}
+}
+
+function renderAdminJadwalTable(){
+  const st = window._adJadwalState; if(!st) return;
+  const wrap = document.getElementById('aj-table-wrap'); if(!wrap) return;
+  const { jadwal, mods, aslabs } = st;
+  let rows = (jadwal||[]).slice();
+  const fGrp = (document.getElementById('aj-grp')||{}).value || '';
+  const fMod = (document.getElementById('aj-mod')||{}).value || '';
+  const fAs  = (document.getElementById('aj-aslab')||{}).value || '';
+  const fDari = (document.getElementById('aj-dari')||{}).value || '';
+  const fSmp  = (document.getElementById('aj-sampai')||{}).value || '';
+  if(fGrp) rows = rows.filter(r => String(r.kelompok)===String(fGrp));
+  if(fMod) rows = rows.filter(r => r.moduleId===fMod);
+  if(fAs)  rows = rows.filter(r => r.setBy===fAs);
+  if(fDari) rows = rows.filter(r => r.tanggal && r.tanggal >= fDari);
+  if(fSmp)  rows = rows.filter(r => r.tanggal && r.tanggal <= fSmp);
+  // sorting default: tanggal asc, sesi asc (sudah dari query, pertahankan)
+  if(!rows.length){
+    wrap.innerHTML = `<div class="card"><p style="color:var(--muted);">Tidak ada jadwal yang cocok dengan filter.</p></div>`;
+    return;
+  }
+  const aslabOpts = aslabs.map(a=>`<option value="${esc(a.username)}">${esc(a.name)}</option>`).join('');
+  wrap.innerHTML = `
+  <div class="tw"><table class="riwayat-table">
+    <thead><tr><th>Modul</th><th>Kelompok</th><th>Tanggal</th><th>Sesi</th><th>Aslab pemegang</th><th>Aksi</th></tr></thead>
+    <tbody>${rows.map((r,i)=>`<tr>
+      <td><span class="tag blue" style="font-size:10px;margin-right:6px;">${esc(r.kode)}</span>${esc(r.judul)}</td>
+      <td>${esc(r.kelompok)}</td>
+      <td>${r.tanggal?esc(fmtTgl(r.tanggal)):'—'}</td>
+      <td>${r.sesi?esc(r.sesi):'—'}</td>
+      <td>${r.setBy?esc(r.aslabName):'—'}</td>
+      <td style="white-space:nowrap;">
+        <button type="button" class="btn btn-sm btn-primary" style="padding:0 10px;font-size:11px;"
+          onclick="openAdminJadwalEdit(${i},'${escAttr(r.moduleId)}','${escAttr(r.kelompok)}')">Edit</button>
+        <button type="button" class="btn btn-sm btn-danger" style="margin-left:4px;padding:0 8px;font-size:11px;"
+          onclick="openAdminJadwalHapus('${escAttr(r.moduleId)}','${escAttr(r.kelompok)}','${escAttr(r.judul)}','${escAttr(r.kelompok)}')">Hapus</button>
+      </td>
+    </tr>`).join('')}</tbody>
+  </table></div>
+  <p style="margin-top:12px;font-size:12px;color:var(--muted);">${rows.length} jadwal ditampilkan.</p>`;
+  // simpan rows hasil filter untuk dipakai modal edit (index i)
+  window._adJadwalRows = rows;
+}
+
+/* — Edit jadwal (admin): ubah aslab pemegang slot + tanggal/sesi.
+   Reuse apiSetSchedule (upsert onConflict module_id,kelompok) — trigger
+   max-3 tetap berjalan; bila slot tujuan penuh, tangkap & tampilkan error. — */
+function openAdminJadwalEdit(idx, moduleId, kelompok){
+  const rows = window._adJadwalRows || [];
+  const r = rows[idx];
+  if(!r){ toast('Data jadwal tidak ditemukan, muat ulang halaman.'); return; }
+  const { aslabs } = window._adJadwalState;
+  const aslabOpts = aslabs.map(a=>`<option value="${esc(a.username)}" ${a.username===r.setBy?'selected':''}>${esc(a.name)}</option>`).join('');
+  document.getElementById('modal-root').innerHTML=`
+  <div class="modal-back" id="aje-back">
+    <div class="modal" style="max-width:520px;">
+      <button class="modal-close" onclick="closeModal()">✕</button>
+      <h3>Edit Jadwal</h3>
+      <p style="font-size:13px;color:var(--muted);margin-bottom:18px;">${esc(r.kode||'')} — ${esc(r.judul)} · Kelompok ${esc(r.kelompok)}</p>
+      <form onsubmit="submitAdminJadwalEdit(event,'${escAttr(moduleId)}','${escAttr(kelompok)}')">
+        <div class="mfield"><label>Aslab pemegang slot</label>
+          <select name="setBy">${aslabOpts}</select></div>
+        <div class="mfield"><label>Tanggal</label>
+          <input type="date" name="tanggal" value="${r.tanggal||''}" required onchange="this.form.sesi&&0"></div>
+        <div class="mfield"><label>Sesi</label>
+          <select name="sesi">${SESI.map(x=>`<option value="${esc(x)}" ${x===r.sesi?'selected':''}>${esc(x)}</option>`).join('')}</select></div>
+        <button type="submit" class="btn btn-primary btn-block" id="aje-save" style="height:46px;margin-top:8px;">Simpan</button>
+      </form>
+    </div>
+  </div>`;
+  document.getElementById('aje-back').onclick=e=>{if(e.target.id==='aje-back')closeModal();};
+}
+
+async function submitAdminJadwalEdit(e, moduleId, kelompok){
+  e.preventDefault();const fd=new FormData(e.target);
+  const st=window._adJadwalState;
+  // cari judul dari moduleId
+  const mod=(st.mods||[]).find(m=>m.id===moduleId);
+  const judul=mod?mod.judul:moduleId;
+  const btn=document.getElementById('aje-save');btn.disabled=true;btn.textContent='Menyimpan…';
+  try{
+    await api('setSchedule',{
+      kelompokId:+kelompok, judul,
+      tanggal:fd.get('tanggal'), sesi:fd.get('sesi'),
+      setBy:fd.get('setBy'),
+    });
+    CACHE={};
+    toast('Jadwal diperbarui.');
+    closeModal();
+    loadAdminJadwal(window._adJadwalState.ses);
+  }catch(err){
+    if(/sudah penuh|maksimal 3 aslab/i.test(err.message)){
+      toast('Slot ini sudah penuh (maks 3 aslab per tanggal). Pilih sesi/tanggal lain.');
+    }else{
+      toast('Gagal: '+err.message);
+    }
+    btn.disabled=false;btn.textContent='Simpan';
+  }
+}
+
+/* — Hapus jadwal (admin) dengan modal konfirmasi EKSPLISIT. Cascade delete
+   nilai terkait via RPC admin_hapus_jadwal (transaksi atomik). — */
+function openAdminJadwalHapus(moduleId, kelompok, judul, kelompokDisp){
+  document.getElementById('modal-root').innerHTML=`
+  <div class="modal-back" id="ajh-back">
+    <div class="modal" style="max-width:460px;">
+      <button class="modal-close" onclick="closeModal()">✕</button>
+      <h3>Hapus Jadwal?</h3>
+      <div class="merr" style="background:rgba(239,68,68,.10);border-color:rgba(239,68,68,.4);margin:14px 0 18px;">
+        Menghapus jadwal <b>${esc(judul)}</b> (Kelompok ${esc(kelompokDisp)}) juga akan menghapus <b>nilai yang sudah diinput</b> untuk slot ini. Operasi ini tidak bisa dibatalkan.
+      </div>
+      <div style="display:flex;gap:10px;">
+        <button type="button" class="btn btn-ghost-dk" style="flex:1;height:46px;" onclick="closeModal()">Batal</button>
+        <button type="button" class="btn btn-danger" style="flex:1;height:46px;border:1.5px solid #ef4444;background:#ef4444;color:#fff;" id="ajh-confirm" onclick="confirmAdminJadwalHapus('${escAttr(moduleId)}','${escAttr(kelompok)}')">Hapus</button>
+      </div>
+    </div>
+  </div>`;
+  document.getElementById('ajh-back').onclick=e=>{if(e.target.id==='ajh-back')closeModal();};
+}
+
+async function confirmAdminJadwalHapus(moduleId, kelompok){
+  const btn=document.getElementById('ajh-confirm');btn.disabled=true;btn.textContent='Menghapus…';
+  try{
+    await api('adminHapusJadwal',{moduleId,kelompok});
+    CACHE={};
+    toast('Jadwal & nilai terkait dihapus.');
+    closeModal();
+    loadAdminJadwal(window._adJadwalState.ses);
+  }catch(err){
+    toast('Gagal: '+err.message);
+    btn.disabled=false;btn.textContent='Hapus';
+  }
+}
+
 async function loadAdminPengguna(ses){
   setContent(loading());
   try{
@@ -1821,5 +2119,49 @@ document.addEventListener('DOMContentLoaded',()=>{
   applyTheme(localStorage.getItem('lp_theme') || 'light');
   initSidebar();
   initCursor();initWebGL();initLoginPanel();loadLandingModules();
+  initGravityEgg();
   const ses=getSession();if(ses){showApp();}else{showLanding();}
 });
+
+/* === EASTER EGG: efek gravitasi sidebar (Fitur 3, RENCANA_PERUBAHAN_v8.md) ===
+   Trigger: 7 klik gabungan pada item sidebar abu-abu (`.sb-link` tanpa class
+   `active` — termasuk nav item non-aktif + tombol Tema/Logout). Counter di
+   state JS biasa (reset saat reload, tidak persist). Efek: elemen jatuh ke
+   bawah viewport (animasi ringan percepatan + bounce kecil), tetap di posisi
+   jatuh (tidak auto-reset). Navigasi asli tetap jalan (link `<a>` tidak
+   di-disable). Sidebar adalah struktur tunggal di index.html, jadi satu
+   inisialisasi (delegasi event pada `#sidebar`) mencakup semua halaman. — */
+const EGG_CLICKS_TARGET = 7;
+function initGravityEgg(){
+  window._eggClicks = 0;
+  window._gravityTriggered = false;
+  const sb = document.getElementById('sidebar');
+  if(!sb || sb.dataset.eggBound) return;
+  sb.dataset.eggBound = '1';
+  sb.addEventListener('click', e=>{
+    if(window._gravityTriggered) return;
+    const link = e.target.closest('.sb-link');
+    if(!link) return;
+    if(link.classList.contains('active')) return; // item aktif (biru) tidak ikut hitung
+    window._eggClicks = (window._eggClicks||0) + 1;
+    if(window._eggClicks >= EGG_CLICKS_TARGET){
+      gravityEggTrigger();
+    }
+  });
+}
+function gravityEggTrigger(){
+  window._gravityTriggered = true;
+  const els = document.querySelectorAll('#sidebar .sb-link:not(.active)');
+  els.forEach((el,i)=>{
+    el.style.animationDelay = (i*0.07)+'s';
+    el.classList.add('gravity-falling');
+  });
+}
+// Re-apply posisi jatuh (statis) ke nav item yang baru dirender setelah
+// renderApp -> buildNav, supaya efek tidak "pulih" saat pindah halaman.
+function gravityEggRestoreFallen(){
+  if(!window._gravityTriggered) return;
+  document.querySelectorAll('#sb-nav .sb-link:not(.active)').forEach(el=>{
+    if(!el.classList.contains('gravity-falling')) el.classList.add('gravity-fallen');
+  });
+}
