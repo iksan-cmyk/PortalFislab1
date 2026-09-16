@@ -2123,45 +2123,58 @@ document.addEventListener('DOMContentLoaded',()=>{
   const ses=getSession();if(ses){showApp();}else{showLanding();}
 });
 
-/* === EASTER EGG: efek gravitasi sidebar (Fitur 3, RENCANA_PERUBAHAN_v8.md) ===
-   Trigger: 7 klik gabungan pada item sidebar abu-abu (`.sb-link` tanpa class
-   `active` — termasuk nav item non-aktif + tombol Tema/Logout). Counter di
-   state JS biasa (reset saat reload, tidak persist). Efek: elemen jatuh ke
-   bawah viewport (animasi ringan percepatan + bounce kecil), tetap di posisi
-   jatuh (tidak auto-reset). Navigasi asli tetap jalan (link `<a>` tidak
-   di-disable). Sidebar adalah struktur tunggal di index.html, jadi satu
-   inisialisasi (delegasi event pada `#sidebar`) mencakup semua halaman. — */
+/* === EASTER EGG: efek gravitasi (Fitur 3, RENCANA_PERUBAHAN_v8.md) ===
+   Trigger: 7 klik pada tombol TOGGLE TEMA (sidebar #btn-theme-sb atau
+   tombol tema mobile di #mob-actions). Counter di state JS biasa (reset
+   saat reload, tidak persist). Efek: elemen sidebar abu-abu (non-aktif)
+   DAN isi halaman yang sedang dibuka (#content) jatuh ke bawah viewport
+   (animasi ringan percepatan + bounce kecil), tetap di posisi jatuh (tidak
+   auto-reset). Navigasi asli tetap jalan (link `<a>` tidak di-disable).
+   Reset hanya via refresh manual. — */
 const EGG_CLICKS_TARGET = 7;
 function initGravityEgg(){
   window._eggClicks = 0;
   window._gravityTriggered = false;
-  const sb = document.getElementById('sidebar');
-  if(!sb || sb.dataset.eggBound) return;
-  sb.dataset.eggBound = '1';
-  sb.addEventListener('click', e=>{
-    if(window._gravityTriggered) return;
-    const link = e.target.closest('.sb-link');
-    if(!link) return;
-    if(link.classList.contains('active')) return; // item aktif (biru) tidak ikut hitung
-    window._eggClicks = (window._eggClicks||0) + 1;
-    if(window._eggClicks >= EGG_CLICKS_TARGET){
-      gravityEggTrigger();
-    }
+  // Tombol toggle tema: sidebar (id) + mobile (onclick toggleTheme).
+  const toggles = document.querySelectorAll('#btn-theme-sb, #mob-actions button[onclick*="toggleTheme"]');
+  toggles.forEach(btn=>{
+    if(btn.dataset.eggBound) return;
+    btn.dataset.eggBound = '1';
+    btn.addEventListener('click', ()=>{
+      if(window._gravityTriggered) return;
+      window._eggClicks = (window._eggClicks||0) + 1;
+      if(window._eggClicks >= EGG_CLICKS_TARGET){
+        gravityEggTrigger();
+      }
+    });
   });
 }
 function gravityEggTrigger(){
   window._gravityTriggered = true;
-  const els = document.querySelectorAll('#sidebar .sb-link:not(.active)');
-  els.forEach((el,i)=>{
-    el.style.animationDelay = (i*0.07)+'s';
+  // 1) sidebar abu-abu (non-aktif)
+  const sbEls = document.querySelectorAll('#sidebar .sb-link:not(.active)');
+  sbEls.forEach((el,i)=>{
+    el.style.animationDelay = (i*0.06)+'s';
     el.classList.add('gravity-falling');
   });
+  // 2) isi halaman yang sedang dibuka
+  const content = document.getElementById('content');
+  if(content){
+    content.style.animationDelay = '0.2s';
+    content.classList.add('gravity-falling');
+  }
 }
-// Re-apply posisi jatuh (statis) ke nav item yang baru dirender setelah
-// renderApp -> buildNav, supaya efek tidak "pulih" saat pindah halaman.
+// Re-apply posisi jatuh (statis) ke nav item + #content yang baru dirender
+// setelah renderApp -> buildNav, supaya efek tidak "pulih" saat pindah
+// halaman. (Animasi gravity-falling cuma jalan sekali; setelah re-render
+// pakai gravity-fallen = posisi akhir statis.)
 function gravityEggRestoreFallen(){
   if(!window._gravityTriggered) return;
-  document.querySelectorAll('#sb-nav .sb-link:not(.active)').forEach(el=>{
+  document.querySelectorAll('#sidebar .sb-link:not(.active)').forEach(el=>{
     if(!el.classList.contains('gravity-falling')) el.classList.add('gravity-fallen');
   });
+  const content = document.getElementById('content');
+  if(content && !content.classList.contains('gravity-falling')){
+    content.classList.add('gravity-fallen');
+  }
 }

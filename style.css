@@ -1810,17 +1810,26 @@ html.dark .modal {
   }
 }
 
-/* === EASTER EGG: efek gravitasi sidebar (Fitur 3, RENCANA_PERUBAHAN_v8.md) ===
-   Dipicu setelah 7 klik pada item sidebar abu-abu (tidak aktif). Elemen jatuh
-   ke bawah viewport, tetap di posisi jatuh (tidak auto-reset). Navigasi asli
-   tetap berfungsi (pointer-events tidak di-disable). Transform murni via
-   @keyframes -> tidak menggeser layout atau memicu scroll horizontal. */
+/* === EASTER EGG: efek gravitasi (Fitur 3, RENCANA_PERUBAHAN_v8.md) ===
+   Dipicu setelah 7 klik pada tombol toggle Tema. Elemen sidebar abu-abu
+   DAN isi halaman (#content) jatuh ke bawah viewport, tetap di posisi
+   jatuh (tidak auto-reset). Navigasi asli tetap berfungsi (pointer-events
+   tidak di-disable). Reset hanya via refresh manual. */
 @keyframes gravityFall {
   0%   { transform: translateY(0) rotate(0deg); opacity: 1; }
   62%  { transform: translateY(78vh) rotate(9deg); opacity: .85; }
   76%  { transform: translateY(72vh) rotate(4deg); opacity: .85; }
   88%  { transform: translateY(80vh) rotate(8deg); opacity: .8; }
   100% { transform: translateY(80vh) rotate(6deg); opacity: .78; }
+}
+/* Variasi untuk isi halaman: jatuh sedikit lebih jauh + rotasi lebih besar,
+   biar terasa "lebih berat" karena area konten lebih besar. */
+@keyframes gravityFallContent {
+  0%   { transform: translateY(0) rotate(0deg); opacity: 1; }
+  60%  { transform: translateY(88vh) rotate(-7deg); opacity: .8; }
+  76%  { transform: translateY(82vh) rotate(-3deg); opacity: .8; }
+  88%  { transform: translateY(90vh) rotate(-6deg); opacity: .75; }
+  100% { transform: translateY(90vh) rotate(-5deg); opacity: .7; }
 }
 .sb-link.gravity-falling {
   animation: gravityFall 1.15s cubic-bezier(.5,.05,.7,.2) forwards;
@@ -1829,4 +1838,12 @@ html.dark .modal {
 .sb-link.gravity-fallen {
   transform: translateY(80vh) rotate(6deg);
   opacity: .78;
+}
+#content.gravity-falling {
+  animation: gravityFallContent 1.3s cubic-bezier(.5,.05,.7,.2) forwards;
+  will-change: transform, opacity;
+}
+#content.gravity-fallen {
+  transform: translateY(90vh) rotate(-5deg);
+  opacity: .7;
 }
