@@ -286,8 +286,9 @@ const CAT_MAP = {
   catKesimpulan: 'cat_kesimpulan',
   catFormat: 'cat_format',
   catPlagiasi: 'cat_plagiasi',
+  catKeterlambatan: 'cat_keterlambatan',
 };
-const KOMP_KEYS = ['prelab','inlab_pengambilan_data','inlab_diskusi','inlab_kerapian','abstrak','pendahuluan','metodologi','analisis_data','analisis_perhitungan_grafik','pembahasan','kesimpulan','format','plagiasi'];
+const KOMP_KEYS = ['prelab','inlab_pengambilan_data','inlab_diskusi','inlab_kerapian','abstrak','pendahuluan','metodologi','analisis_data','analisis_perhitungan_grafik','pembahasan','kesimpulan','format','plagiasi','keterlambatan'];
 
 async function migrateGrades() {
   console.log('\n=== grades ===');

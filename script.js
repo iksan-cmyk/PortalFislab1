@@ -14,6 +14,7 @@ const KOMP = [
   { key:'kesimpulan',                 label:'Laporan Kesimpulan',              bobot:5,  cat:'catKesimpulan'                 },
   { key:'format',                     label:'Laporan Formating',               bobot:5,  cat:'catFormat'                    },
   { key:'plagiasi',                   label:'Plagiasi',                        bobot:0,  cat:'catPlagiasi'                   },
+  { key:'keterlambatan',              label:'Keterlambatan (poin pengurang)',  bobot:0,  cat:'catKeterlambatan'              },
 ];
 function hitungTotal(g) {
   let total = 0;
@@ -237,8 +238,8 @@ async function apiGetUsers() {
 async function apiGetGrades(body) {
   let query = SB.from('grades').select(`
     username, module_id, set_by, updated_at, nilai_akhir,
-    prelab, inlab_pengambilan_data, inlab_diskusi, inlab_kerapian, abstrak, pendahuluan, metodologi, analisis_data, analisis_perhitungan_grafik, pembahasan, kesimpulan, format, plagiasi,
-    cat_prelab, cat_inlab_pengambilan_data, cat_inlab_diskusi, cat_inlab_kerapian, cat_abstrak, cat_pendahuluan, cat_metodologi, cat_analisis_data, cat_analisis_perhitungan_grafik, cat_pembahasan, cat_kesimpulan, cat_format, cat_plagiasi,
+    prelab, inlab_pengambilan_data, inlab_diskusi, inlab_kerapian, abstrak, pendahuluan, metodologi, analisis_data, analisis_perhitungan_grafik, pembahasan, kesimpulan, format, plagiasi, keterlambatan,
+    cat_prelab, cat_inlab_pengambilan_data, cat_inlab_diskusi, cat_inlab_kerapian, cat_abstrak, cat_pendahuluan, cat_metodologi, cat_analisis_data, cat_analisis_perhitungan_grafik, cat_pembahasan, cat_kesimpulan, cat_format, cat_plagiasi, cat_keterlambatan,
     modules:module_id(judul)
   `);
   if (body.username) query = query.eq('username', body.username);
@@ -260,14 +261,14 @@ async function apiGetGrades(body) {
     pendahuluan: g.pendahuluan ?? '', metodologi: g.metodologi ?? '',
     analisis_data: g.analisis_data ?? '', analisis_perhitungan_grafik: g.analisis_perhitungan_grafik ?? '',
     pembahasan: g.pembahasan ?? '',
-    kesimpulan: g.kesimpulan ?? '', format: g.format ?? '', plagiasi: g.plagiasi ?? '',
+    kesimpulan: g.kesimpulan ?? '', format: g.format ?? '', plagiasi: g.plagiasi ?? '', keterlambatan: g.keterlambatan ?? '',
     catPrelab: g.cat_prelab || '', catInlabPengambilanData: g.cat_inlab_pengambilan_data || '',
     catInlabDiskusi: g.cat_inlab_diskusi || '', catInlabKerapian: g.cat_inlab_kerapian || '',
     catAbstrak: g.cat_abstrak || '', catPendahuluan: g.cat_pendahuluan || '',
     catMetodologi: g.cat_metodologi || '', catAnalisisData: g.cat_analisis_data || '',
     catAnalisisPerhitunganGrafik: g.cat_analisis_perhitungan_grafik || '',
     catPembahasan: g.cat_pembahasan || '', catKesimpulan: g.cat_kesimpulan || '',
-    catFormat: g.cat_format || '', catPlagiasi: g.cat_plagiasi || '',
+    catFormat: g.cat_format || '', catPlagiasi: g.cat_plagiasi || '', catKeterlambatan: g.cat_keterlambatan || '',
   }))};
 }
 
@@ -447,7 +448,7 @@ async function apiSetGrade(body) {
     set_by: body.setBy,
     updated_at: new Date().toISOString(),
   };
-  const KOMP = ['prelab','inlab_pengambilan_data','inlab_diskusi','inlab_kerapian','abstrak','pendahuluan','metodologi','analisis_data','analisis_perhitungan_grafik','pembahasan','kesimpulan','format','plagiasi'];
+  const KOMP = ['prelab','inlab_pengambilan_data','inlab_diskusi','inlab_kerapian','abstrak','pendahuluan','metodologi','analisis_data','analisis_perhitungan_grafik','pembahasan','kesimpulan','format','plagiasi','keterlambatan'];
   const CAT = [
     ['catPrelab','cat_prelab'], ['catInlabPengambilanData','cat_inlab_pengambilan_data'],
     ['catInlabDiskusi','cat_inlab_diskusi'], ['catInlabKerapian','cat_inlab_kerapian'],
@@ -455,7 +456,7 @@ async function apiSetGrade(body) {
     ['catMetodologi','cat_metodologi'], ['catAnalisisData','cat_analisis_data'],
     ['catAnalisisPerhitunganGrafik','cat_analisis_perhitungan_grafik'],
     ['catPembahasan','cat_pembahasan'], ['catKesimpulan','cat_kesimpulan'],
-    ['catFormat','cat_format'], ['catPlagiasi','cat_plagiasi'],
+    ['catFormat','cat_format'], ['catPlagiasi','cat_plagiasi'], ['catKeterlambatan','cat_keterlambatan'],
   ];
   for (const k of KOMP) {
     if (body[k] !== undefined && body[k] !== '') rec[k] = parseFloat(body[k]);
@@ -1181,6 +1182,14 @@ async function loadJadwalA(ses){
       window._jadwalTerisi = m;
     } catch(_) { window._jadwalTerisi = null; }
 
+    // ambil jadwal lintas-aslab dengan module_id + kelompok (RPC 0011) untuk
+    // pra-pengecekan aturan E3/E9 di sisi klien (Tugas 3, RENCANA_PERUBAHAN_v9).
+    // Gagal ambil -> pra-cek nonaktif; trigger DB tetap sumber kebenaran.
+    try {
+      const { jadwal: jadwalAll } = await api('getJadwalKelompokModul');
+      window._jadwalE3E9 = jadwalAll || [];
+    } catch(_) { window._jadwalE3E9 = null; }
+
     setContent(`
     <div class="ph"><span class="ey">Pengaturan</span><h1>Jadwal Praktikum</h1></div>
     ${myMods.map(mod=>{
@@ -1224,9 +1233,48 @@ async function loadJadwalA(ses){
     }).join('')}`);
   }catch(e){setContent(`<p style="color:red">${esc(e.message)}</p>`);}
 }
+/* — cekAturanE3E9Client: pra-pengecekan aturan E3/E9 di sisi klien memakai
+   data jadwal lintas-aslab (window._jadwalE3E9 dari RPC getJadwalKelompokModul).
+   Return pesan error (string) bila melanggar, atau null bila OK.
+   Mengecualikan baris sendiri (module_id + kelompok yang sama) karena upsert
+   menggantikan baris itu. Trigger DB (0015) tetap cadangan untuk race condition. — */
+function cekAturanE3E9Client(tanggal, sesi, judul, kelompokId){
+  if(!tanggal || !sesi) return null;
+  const mods = APP.modules || [];
+  const mod = mods.find(m => m.judul === judul);
+  if(!mod) return null; // tidak ketahui kode -> skip pra-cek, biarkan DB
+  const kode = (mod.kode || '').toUpperCase().trim();
+  const jadwal = window._jadwalE3E9;
+  if(!Array.isArray(jadwal)) return null; // data tidak tersedia -> biarkan DB
+  const kodeOf = (mid) => {
+    const m = mods.find(x => x.id === mid);
+    return m ? (m.kode || '').toUpperCase().trim() : '';
+  };
+  const sameSlot = jadwal.filter(j =>
+    j.tanggal === tanggal && j.sesi === sesi &&
+    !(j.moduleId === mod.id && +j.kelompok === +kelompokId)
+  );
+  if(kode === 'E3'){
+    const adaNonE3 = sameSlot.some(j => kodeOf(j.moduleId) !== 'E3');
+    if(adaNonE3) return 'E3 tidak boleh berada di sesi yang sama dengan judul lain. Sesi ini sudah berisi judul lain.';
+    const e3Kelompok = new Set(sameSlot.filter(j => kodeOf(j.moduleId) === 'E3').map(j => j.kelompok));
+    if(e3Kelompok.size >= 2) return 'Sesi ini sudah memiliki 2 kelompok E3 (maksimal 2 kelompok per sesi).';
+  } else {
+    const jmlE3 = sameSlot.filter(j => kodeOf(j.moduleId) === 'E3').length;
+    if(jmlE3 >= 1) return 'Sesi ini berisi E3. Judul lain tidak boleh dijadwalkan di sesi yang sama dengan E3.';
+    if(kode === 'E9'){
+      const e9Kelompok = new Set(sameSlot.filter(j => kodeOf(j.moduleId) === 'E9').map(j => j.kelompok));
+      if(e9Kelompok.size >= 1) return 'Sesi ini sudah memiliki 1 kelompok E9 (maksimal 1 kelompok per sesi).';
+    }
+  }
+  return null;
+}
 async function submitJadwal(e,kelompokId,judul,setBy){
   e.preventDefault();const fd=new FormData(e.target);const btn=e.target.querySelector('button[type=submit]');
   btn.disabled=true;btn.textContent='Menyimpan…';
+  // Pra-pengecekan aturan E3/E9 di sisi klien (Tugas 3, RENCANA_PERUBAHAN_v9).
+  const cekErr = cekAturanE3E9Client(fd.get('tanggal'), fd.get('sesi'), judul, +kelompokId);
+  if(cekErr){ toast(cekErr); btn.disabled=false; btn.textContent='Simpan'; return; }
   try{
     await api('setSchedule',
     {kelompokId:+kelompokId,judul,tanggal:fd.get('tanggal'),
@@ -1242,6 +1290,11 @@ async function submitJadwal(e,kelompokId,judul,setBy){
       toast('Jadwal ini sudah penuh (maks 3 aslab per tanggal). Pilih sesi/tanggal lain.');
       window._jadwalTerisi = null; // paksa ambil ulang indikator
       renderApp(); // renderApp -> loadJadwalA -> re-fetch katalog, tampilan sinkron
+    } else if (/E3 tidak boleh berada|Sesi ini berisi E3|2 kelompok E3|1 kelompok E9/i.test(err.message)) {
+      // Cadangan: trigger DB (0015) menolak karena race condition dua aslab bersamaan.
+      toast(err.message);
+      window._jadwalE3E9 = null; // paksa ambil ulang data jadwal
+      renderApp();
     } else {
       toast('Gagal: '+err.message);btn.disabled=false;btn.textContent='Simpan';
     }
@@ -1587,6 +1640,39 @@ function aGrpChange(sel){
     list.map(u=>`<option value="${esc(u.username)}">${esc(u.name)}</option>`).join('');
 }
 
+/* — setupInputNilaiKeys: pasang navigasi Enter + cegah scroll-wheel ubah nilai
+   pada input angka di form Input Nilai (aslab & modal admin). Dipanggil sekali
+   saat form dirender (form lama di-replace via innerHTML -> listener lama ikut
+   hilang, tidak terpasang ganda). Enter di baris non-terakhir -> fokus ke input
+   berikutnya + select() isi. Enter di baris terakhir -> submit via jalur yang
+   sama dengan tombol Simpan (form.requestSubmit / dispatch submit). Hanya
+   tangani input[type=number] di .nform-grid — bukan textarea catatan. — */
+function setupInputNilaiKeys(form, saveBtnId){
+  if(!form) return;
+  form.addEventListener('keydown', e=>{
+    if(e.key!=='Enter') return;
+    const t=e.target;
+    if(!t||t.tagName!=='INPUT'||t.type!=='number') return;
+    if(!t.closest('.nform-grid')) return;
+    e.preventDefault();
+    const inputs=Array.from(form.querySelectorAll('.nform-num input[type=number]'));
+    const idx=inputs.indexOf(t); if(idx<0) return;
+    if(typeof t.checkValidity==='function' && !t.checkValidity()){ t.reportValidity(); return; }
+    if(idx < inputs.length-1){
+      const n=inputs[idx+1]; n.focus(); n.select();
+    } else {
+      const btn=document.getElementById(saveBtnId);
+      if(btn && btn.disabled) return;
+      if(typeof form.requestSubmit==='function') form.requestSubmit();
+      else form.dispatchEvent(new Event('submit',{cancelable:true,bubbles:true}));
+    }
+  });
+  form.addEventListener('wheel', e=>{
+    const t=e.target;
+    if(t && t.tagName==='INPUT' && t.type==='number' && t.closest('.nform-grid')) e.preventDefault();
+  }, { passive:false });
+}
+
 async function aStuChange(sel){
   const wrap=document.getElementById('a-grade-wrap');
   if(!sel.value){wrap.innerHTML='';return;}
@@ -1622,6 +1708,7 @@ async function aStuChange(sel){
         </button>
       </form>
     </div>`;
+    setupInputNilaiKeys(wrap.querySelector('form'), 'btn-save-grade');
   }catch(err){wrap.innerHTML=`<p style="color:red">${esc(err.message)}</p>`;}
 }
 
@@ -1755,6 +1842,7 @@ function openAdminNilaiForm(username, judul){
     </div>
   </div>`;
   document.getElementById('anf-back').onclick=e=>{if(e.target.id==='anf-back')closeModal();};
+  setupInputNilaiKeys(document.querySelector('#modal-root form'), 'anf-save');
 }
 function updateAdminTotal(form){
   const fd=new FormData(form);let total=0;
