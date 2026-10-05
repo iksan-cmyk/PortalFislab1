@@ -17,12 +17,42 @@ const KOMP = [
   { key:'keterlambatan',              label:'Keterlambatan (poin pengurang)',  bobot:0,  cat:'catKeterlambatan'              },
 ];
 function hitungTotal(g) {
-  let total = 0;
-  KOMP.forEach(k => {
-    const val = parseFloat(g[k.key]);
-    if (!isNaN(val) && k.bobot > 0) total += val * (k.bobot / 100);
-  });
-  return Math.round(total * 100) / 100;
+  // Meniru rumus server recompute_nilai_akhir (0014_keterlambatan.sql:47-68):
+  //   GREATEST(0, ROUND(2 desimal) dari jumlah(bobot_komponen) - plagiasi - keterlambatan).
+  // NULL/NaN diperlakukan 0 (setara COALESCE). Bobot dari KOMP (persen).
+  const num = v => { const n = parseFloat(v); return isNaN(n) ? 0 : n; };
+  let sum = 0;
+  KOMP.forEach(k => { if (k.bobot > 0) sum += num(g[k.key]) * (k.bobot / 100); });
+  sum -= num(g.plagiasi);
+  sum -= num(g.keterlambatan);
+  return Math.round(Math.max(0, sum) * 100) / 100;
+}
+// hitungTotalDariForm: baca FormData form input nilai -> objek -> hitungTotal.
+function hitungTotalDariForm(form) {
+  const fd = new FormData(form);
+  const g = {};
+  KOMP.forEach(k => { g[k.key] = fd.get(k.key); });
+  return hitungTotal(g);
+}
+// updateTotal: pratinjau form aslab (aStuChange).
+function updateTotal(form) {
+  const el = document.getElementById('total-preview-val');
+  if (!el) return;
+  const total = hitungTotalDariForm(form);
+  el.textContent = total.toFixed(2);
+}
+// nilaiVal: tampilan nilai di input form. '' hanya bila undefined/null/'';
+// nilai 0 yang sah tetap tampil '0' (Tugas 5).
+function nilaiVal(v) {
+  return (v === undefined || v === null || v === '') ? '' : v;
+}
+// totalDisplay: tampilan pratinjau total. '—' hanya bila SEMUA komponen (kecuali
+// keterlambatan) kosong. Nilai total 0 tetap tampil '0.00'. (Tugas 1.5)
+function totalDisplay(g) {
+  const adaNilai = KOMP.some(k => k.key !== 'keterlambatan'
+    && g[k.key] !== undefined && g[k.key] !== null && g[k.key] !== '');
+  if (!adaNilai) return '—';
+  return hitungTotal(g).toFixed(2);
 }
 function scoreClass(v) {
   if (v === null || v === '') return 'na';
@@ -63,7 +93,7 @@ async function api(action, body={}, useCache=false) {
   return data;
 }
 
-/* — Supabase auth: login berbasis username, email sintetis {username}@portalfislab.local — */
+/* — Supabase auth: login berbasis username, email sintetis {username}@student.its.ac.id — */
 async function apiLogin(body) {
   const username = (body.username || '').trim().toLowerCase();
   if (!username) throw new Error('Username wajib diisi.');
@@ -458,8 +488,17 @@ async function apiSetGrade(body) {
     ['catPembahasan','cat_pembahasan'], ['catKesimpulan','cat_kesimpulan'],
     ['catFormat','cat_format'], ['catPlagiasi','cat_plagiasi'], ['catKeterlambatan','cat_keterlambatan'],
   ];
+  // Komponen nilai: kunci yang ada di body -> null bila kosong/NaN, selain itu parseFloat.
+  // Khusus keterlambatan (NOT NULL DEFAULT 0 di DB, 0014) -> kirim 0 bila kosong (Tugas 4.2).
   for (const k of KOMP) {
-    if (body[k] !== undefined && body[k] !== '') rec[k] = parseFloat(body[k]);
+    if (body[k] === undefined) continue; // kunci tidak ada di body -> jangan sentuh (pertahankan nilai lama)
+    const v = body[k];
+    if (v === '' || v === null) {
+      rec[k] = (k === 'keterlambatan') ? 0 : null;
+    } else {
+      const n = parseFloat(v);
+      rec[k] = isNaN(n) ? ((k === 'keterlambatan') ? 0 : null) : n;
+    }
   }
   for (const [camel, snake] of CAT) {
     if (body[camel] !== undefined) rec[snake] = body[camel] || null;
@@ -593,7 +632,7 @@ function initCursor() {
 
 function openViewer(mod) {
   if (!mod.fileUrl || mod.fileUrl.includes('GANTI')) {
-    alert('URL file belum diisi untuk modul ini. Isi kolom fileUrl di sheet modules.'); return;
+    alert('File modul belum tersedia untuk modul ini. Hubungi admin.'); return;
   }
   let src = mod.fileUrl;
   if (mod.fileType === 'pdf') {
@@ -665,7 +704,6 @@ function initLoginPanel() {
     errEl.innerHTML=''; btn.disabled=true; btn.innerHTML='<span class="spinner"></span>';
     try {
       const {user}=await api('login',{username:document.getElementById('f-user').value.trim().toLowerCase(),password:document.getElementById('f-pass').value});
-      console.log("LOGIN RESPONSE", user);
       setSession(user); closePanel(); showApp();
     } catch(err) {
       errEl.innerHTML=`<div class="login-err">${esc(err.message)}</div>`;
@@ -790,14 +828,13 @@ function initSidebar() {
     if (btn) btn.textContent = '‹';
   }
 }
-function roleLabel(u){ 
+function roleLabel(u){
   if(
     u.role==='admin'
   )
   return'Administrator';
   if(u.role==='aslab') return 'Asisten Lab — '+(Array.isArray(u.kode)?u.kode.join(', '):u.kode||'');
-  return 'Praktikan · Kelompok '+u.kelompok; 
-  return'Praktikan · Kelompok '+u.kelompok; 
+  return 'Praktikan · Kelompok '+u.kelompok;
 }
 function buildNav(items, active) {
   // sidebar
@@ -821,38 +858,6 @@ function buildNav(items, active) {
 function setContent(html){
   document.getElementById('content').innerHTML=html;
 }
-async function preloadData(ses) {
-
-  const req = [
-    getMods()
-  ];
-
-  if (ses.role === "praktikan") {
-    req.push(api("getGrades", { username: ses.username }));
-    req.push(api("getSchedules", { kelompok: ses.kelompok }));
-  }
-
-  if (ses.role === "aslab") {
-    req.push(api("getUsers"));
-    req.push(api("getSchedules", { judul: ses.judul }));
-  }
-
-  const result = await Promise.all(req);
-
-  APP.modules = result[0];
-
-  if (ses.role === "praktikan") {
-    APP.grades = result[1].grades;
-    APP.schedules = result[2].schedules;
-  }
-
-  if (ses.role === "aslab") {
-    APP.users = result[1].users;
-    APP.schedules = result[2].schedules;
-  }
-
-}
-
 /*praktikan*/
 const NAV_P=[{path:'/p/dashboard',label:'Dashboard',icon:'profil'},{path:'/p/modul',label:'Modul',icon:'modul'},
   {path:'/p/jadwal',label:'Jadwal',icon:'jadwal'},{path:'/p/nilai',label:'Nilai',icon:'nilai'},{path:'/p/kontak',label:'Kontak',icon:'kontak'}];
@@ -965,14 +970,21 @@ async function loadNilaiP(ses){
       <div class="nilai-accordion">
         ${mods.map(m=>{
           const g=grades.find(x=>x.judul===m.id||x.judul===m.judul)||{};
-          const total=g.nilaiAkhir||hitungTotal(g)||null;
+          // total dari server bila ada; bila null/kosong -> pratinjau hitungTotal (mungkin 0).
+          const hasNilaiServer = g.nilaiAkhir !== undefined && g.nilaiAkhir !== null && g.nilaiAkhir !== '';
+          const total = hasNilaiServer ? g.nilaiAkhir : hitungTotal(g);
+          // "Belum dinilai" hanya bila tidak ada nilai server DAN semua komponen
+          // (kecuali keterlambatan) kosong. Total 0 yang sah tetap tampil '0.00'.
+          const adaKomponen = KOMP.some(k => k.key !== 'keterlambatan'
+            && g[k.key] !== undefined && g[k.key] !== null && g[k.key] !== '');
+          const sudahDinilai = hasNilaiServer || adaKomponen;
           const hasCat=KOMP.some(k=>g[k.cat]);
           return`<div class="ncard" id="nc-${m.id}">
             <div class="ncard-head" onclick="toggleNcard('${m.id}')">
               <span class="ncard-title">${esc(m.judul)}</span>
               <div class="ncard-meta">
                 ${hasCat?`<span class="tag amber" style="font-size:10px;">Ada catatan</span>`:''}
-                ${total?`<span class="ncard-total">${parseFloat(total).toFixed(2)}</span>`:'<span class="tag" style="font-size:11px;">Belum dinilai</span>'}
+                ${sudahDinilai?`<span class="ncard-total">${parseFloat(total).toFixed(2)}</span>`:'<span class="tag" style="font-size:11px;">Belum dinilai</span>'}
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="color:var(--muted);transition:transform .2s;" class="ncard-chevron"><polyline points="6 9 12 15 18 9"/></svg>
               </div>
             </div>
@@ -1086,11 +1098,9 @@ function openKontakPanel(name, judul, photo, inits, waNum) {
   }
 }
 function kirimWA(waNum, aslabName, namaEnc, nrp, kelompok) {
-  console.log('waNum raw:', waNum);
   const isi = document.getElementById('pesanTA')?.value || '';
   const nama = decodeURIComponent(namaEnc);
   const num = waNum.startsWith('0') ? '62'+waNum.slice(1) : waNum;
-  console.log('num final:', num);
   const template =
 `Halo Kak ${aslabName}, perkenalkan saya:
 
@@ -1111,36 +1121,46 @@ function renderAslab(hash,ses){const path=hash||'/a/jadwal';buildNav(NAV_A,path)
 }
 
 const SESI = ['07.00-08.40','09.00-10.40','11.00-12.40','13.30-15.10','15.30-17.10','18.30-20.20'];
-const MAX_ASLAB_PER_SLOT = 3; // batas trigger DB (0009_batas_aslab_jadwal.sql)
-// _jadwalTerisi: Map "tanggal|sesi" -> jumlah aslab terisi (lintas-aslab, via RPC katalog_jadwal_aslab).
-// Diisi saat loadJadwalA; dipakai sesiOptionsHtml/updateSesiOptions untuk indikator "x/3" & "Penuh".
-window._jadwalTerisi = null;
+const MAX_KELOMPOK_PER_SESI = 3; // batas umum trigger DB (0016_perbaikan_aturan_jadwal.sql)
+// _jadwalE3E9: array jadwal lintas-aslab dari RPC getJadwalKelompokModul (punya moduleId & kelompok).
+// Diisi saat loadJadwalA; dipakai terisiCount & cekAturanE3E9Client. (Tugas 3.2)
+window._jadwalE3E9 = null;
 function getSesiOptions(tanggal){
   return SESI;
 }
-function terisiCount(tanggal, sesi){
-  if(!window._jadwalTerisi || !tanggal) return 0;
-  return window._jadwalTerisi.get(tanggal+'|'+sesi) || 0;
+// terisiCount: hitung baris jadwal LAIN di slot yang sama, exclude baris sendiri (own).
+// own = {moduleId, kelompok}. Mengambil data dari window._jadwalE3E9 (Tugas 3.2).
+function terisiCount(tanggal, sesi, own){
+  if(!Array.isArray(window._jadwalE3E9) || !tanggal) return 0;
+  return window._jadwalE3E9.filter(j =>
+    j.tanggal === tanggal && j.sesi === sesi &&
+    !(own && j.moduleId === own.moduleId && +j.kelompok === +own.kelompok)
+  ).length;
 }
 // sesiOptionsHtml: opsi sesi + indikator terisi (x/3) atau disabled "Penuh" jika sudah 3.
-// Catatan: opsi yang sudah penuh TETAP selected kalau itu nilai saat ini (aslab keep slot sendiri);
-// trigger DB exclude diri sendiri (set_by IS DISTINCT FROM) -> simpan slot sendiri tetap aman.
-function sesiOptionsHtml(tanggal, currentSesi){
+// Opsi yang sama dengan currentSesi TIDAK boleh disabled (bug lama: opsi terpilih yang
+// disabled tidak ikut terkirim form -> sesi null saat aslab simpan ulang slot sendiri di
+// slot yang sudah penuh). (Tugas 3.3)
+function sesiOptionsHtml(tanggal, currentSesi, own){
   return getSesiOptions(tanggal).map(x=>{
-    const c = terisiCount(tanggal, x);
-    const full = c >= MAX_ASLAB_PER_SLOT;
-    const label = full ? x+' (Penuh)' : (c>0 ? x+' ('+c+'/'+MAX_ASLAB_PER_SLOT+')' : x);
-    return `<option value="${esc(x)}" ${x===currentSesi?'selected':''} ${full?'disabled':''}>${esc(label)}</option>`;
+    const c = terisiCount(tanggal, x, own);
+    const full = c >= MAX_KELOMPOK_PER_SESI;
+    const label = full ? x+' (Penuh)' : (c>0 ? x+' ('+c+'/'+MAX_KELOMPOK_PER_SESI+')' : x);
+    const isCurrent = x === currentSesi;
+    // disabled hanya bila penuh DAN bukan opsi yang sedang terpilih.
+    const dis = full && !isCurrent ? 'disabled' : '';
+    return `<option value="${esc(x)}" ${isCurrent?'selected':''} ${dis}>${esc(label)}</option>`;
   }).join('');
 }
 function updateSesiOptions(dateInput){
-  const select = dateInput.closest('.fr').querySelector('select[name="sesi"]');
+  const form = dateInput.closest('form');
+  const select = form.querySelector('select[name="sesi"]');
+  const own = { moduleId: form.dataset.modul, kelompok: form.dataset.kelompok };
   const current = select.value;
-  select.innerHTML = sesiOptionsHtml(dateInput.value, current);
+  select.innerHTML = sesiOptionsHtml(dateInput.value, current, own);
 }
 
 function loadProfilA(ses){
-  console.log("SESSION", JSON.stringify(ses, null, 2));
   setContent(`<div class="phero">${av(ses,'av-lg')}<div style="flex:1"><h2>${esc(ses.name)}</h2><p>Asisten Lab</p></div>
     </div>
     <div class="g g2">
@@ -1170,21 +1190,10 @@ async function loadJadwalA(ses){
     );
     const schedules = allSchedules.flat();
 
-    // ambil katalog jadwal lintas-aslab (RPC SECURITY DEFINER) untuk indikator terisi per slot.
-    // Gagal ambil -> indikator nonaktif (slot tetap bisa dipilih; trigger DB tetap jadi sumber kebenaran).
-    try {
-      const { katalog } = await api('getKatalogJadwal');
-      const m = new Map();
-      for (const row of katalog) {
-        const k = (row.tanggal||'') + '|' + (row.sesi||'');
-        m.set(k, (m.get(k) || 0) + 1);
-      }
-      window._jadwalTerisi = m;
-    } catch(_) { window._jadwalTerisi = null; }
-
     // ambil jadwal lintas-aslab dengan module_id + kelompok (RPC 0011) untuk
-    // pra-pengecekan aturan E3/E9 di sisi klien (Tugas 3, RENCANA_PERUBAHAN_v9).
-    // Gagal ambil -> pra-cek nonaktif; trigger DB tetap sumber kebenaran.
+    // indikator terisi (Tugas 3.2) & pra-pengecekan aturan E3/E9 di sisi klien.
+    // Gagal ambil -> indikator & pra-cek nonaktif; trigger DB tetap sumber kebenaran.
+    // Halaman Katalog tetap memakai getKatalogJadwal (tidak diubah di sini).
     try {
       const { jadwal: jadwalAll } = await api('getJadwalKelompokModul');
       window._jadwalE3E9 = jadwalAll || [];
@@ -1212,12 +1221,12 @@ async function loadJadwalA(ses){
               <p style="margin-bottom:14px;font-size:13px;color:var(--muted);">
                 ${s?'Terjadwal: '+fmtTgl(s.tanggal)+' · '+esc(s.sesi):'Belum dijadwalkan'}
               </p>
-              <form onsubmit="submitJadwal(event,'${escAttr(r.kelompok)}','${escAttr(mod.judul)}','${escAttr(ses.username)}')">
+              <form data-modul="${escAttr(mod.id)}" data-kelompok="${escAttr(r.kelompok)}" onsubmit="submitJadwal(event,'${escAttr(r.kelompok)}','${escAttr(mod.judul)}','${escAttr(ses.username)}')">
                 <div class="fr">
                   <div class="ff"><label>Tanggal</label>
                 <input type="date" name="tanggal" value="${s?s.tanggal:''}" required onchange="updateSesiOptions(this)"></div>
               <div class="ff"><label>Sesi</label>
-                <select name="sesi">${sesiOptionsHtml(s?s.tanggal:'', s?s.sesi:'')}</select>
+                <select name="sesi">${sesiOptionsHtml(s?s.tanggal:'', s?s.sesi:'', {moduleId: mod.id, kelompok: r.kelompok})}</select>
               </div>
                 </div>
                 <div style="margin-top:12px;display:flex;gap:10px;">
@@ -1233,11 +1242,16 @@ async function loadJadwalA(ses){
     }).join('')}`);
   }catch(e){setContent(`<p style="color:red">${esc(e.message)}</p>`);}
 }
-/* — cekAturanE3E9Client: pra-pengecekan aturan E3/E9 di sisi klien memakai
+/* — cekAturanE3E9Client: pra-pengecekan aturan jadwal di sisi klien memakai
    data jadwal lintas-aslab (window._jadwalE3E9 dari RPC getJadwalKelompokModul).
    Return pesan error (string) bila melanggar, atau null bila OK.
    Mengecualikan baris sendiri (module_id + kelompok yang sama) karena upsert
-   menggantikan baris itu. Trigger DB (0015) tetap cadangan untuk race condition. — */
+   menggantikan baris itu. Trigger DB (0016) tetap cadangan untuk race condition.
+   Aturan (Tugas 3.1):
+     - umum: maksimal 3 kelompok per sesi.
+     - E3: maksimal 2 kelompok E3 per sesi.
+     - E9: maksimal 1 kelompok E9 per sesi.
+   Tidak ada lagi larangan "E3 bersama judul lain" / "judul lain di sesi E3". — */
 function cekAturanE3E9Client(tanggal, sesi, judul, kelompokId){
   if(!tanggal || !sesi) return null;
   const mods = APP.modules || [];
@@ -1254,25 +1268,27 @@ function cekAturanE3E9Client(tanggal, sesi, judul, kelompokId){
     j.tanggal === tanggal && j.sesi === sesi &&
     !(j.moduleId === mod.id && +j.kelompok === +kelompokId)
   );
+  // a) Batas umum 3 kelompok per sesi.
+  if(sameSlot.length >= MAX_KELOMPOK_PER_SESI)
+    return 'Jadwal ini sudah penuh: maksimal 3 kelompok per sesi.';
+  // b) E3 maksimal 2.
   if(kode === 'E3'){
-    const adaNonE3 = sameSlot.some(j => kodeOf(j.moduleId) !== 'E3');
-    if(adaNonE3) return 'E3 tidak boleh berada di sesi yang sama dengan judul lain. Sesi ini sudah berisi judul lain.';
-    const e3Kelompok = new Set(sameSlot.filter(j => kodeOf(j.moduleId) === 'E3').map(j => j.kelompok));
-    if(e3Kelompok.size >= 2) return 'Sesi ini sudah memiliki 2 kelompok E3 (maksimal 2 kelompok per sesi).';
-  } else {
-    const jmlE3 = sameSlot.filter(j => kodeOf(j.moduleId) === 'E3').length;
-    if(jmlE3 >= 1) return 'Sesi ini berisi E3. Judul lain tidak boleh dijadwalkan di sesi yang sama dengan E3.';
-    if(kode === 'E9'){
-      const e9Kelompok = new Set(sameSlot.filter(j => kodeOf(j.moduleId) === 'E9').map(j => j.kelompok));
-      if(e9Kelompok.size >= 1) return 'Sesi ini sudah memiliki 1 kelompok E9 (maksimal 1 kelompok per sesi).';
-    }
+    const e3Lain = sameSlot.filter(j => kodeOf(j.moduleId) === 'E3');
+    if(e3Lain.length >= 2)
+      return 'Sesi ini sudah memiliki 2 kelompok E3 (maksimal 2 per sesi).';
+  }
+  // c) E9 maksimal 1.
+  if(kode === 'E9'){
+    const e9Lain = sameSlot.filter(j => kodeOf(j.moduleId) === 'E9');
+    if(e9Lain.length >= 1)
+      return 'Sesi ini sudah memiliki 1 kelompok E9 (maksimal 1 per sesi).';
   }
   return null;
 }
 async function submitJadwal(e,kelompokId,judul,setBy){
   e.preventDefault();const fd=new FormData(e.target);const btn=e.target.querySelector('button[type=submit]');
   btn.disabled=true;btn.textContent='Menyimpan…';
-  // Pra-pengecekan aturan E3/E9 di sisi klien (Tugas 3, RENCANA_PERUBAHAN_v9).
+  // Pra-pengecekan aturan jadwal di sisi klien (Tugas 3.4).
   const cekErr = cekAturanE3E9Client(fd.get('tanggal'), fd.get('sesi'), judul, +kelompokId);
   if(cekErr){ toast(cekErr); btn.disabled=false; btn.textContent='Simpan'; return; }
   try{
@@ -1284,14 +1300,9 @@ async function submitJadwal(e,kelompokId,judul,setBy){
     toast(`Jadwal kelompok ${kelompokId} tersimpan.`);renderApp();
   }
   catch(err){
-    // Race condition: dua aslab submit bersamaan, slot ke-4 kena trigger DB (P0001).
+    // Race condition: dua aslab submit bersamaan, trigger DB (0016) menolak.
     // Tangkap, beri pesan jelas, lalu refresh data opsi supaya indikator sinkron lagi.
-    if (/sudah penuh|maksimal 3 aslab/i.test(err.message)) {
-      toast('Jadwal ini sudah penuh (maks 3 aslab per tanggal). Pilih sesi/tanggal lain.');
-      window._jadwalTerisi = null; // paksa ambil ulang indikator
-      renderApp(); // renderApp -> loadJadwalA -> re-fetch katalog, tampilan sinkron
-    } else if (/E3 tidak boleh berada|Sesi ini berisi E3|2 kelompok E3|1 kelompok E9/i.test(err.message)) {
-      // Cadangan: trigger DB (0015) menolak karena race condition dua aslab bersamaan.
+    if (/sudah penuh|maksimal 3 kelompok|2 kelompok E3|1 kelompok E9/i.test(err.message)) {
       toast(err.message);
       window._jadwalE3E9 = null; // paksa ambil ulang data jadwal
       renderApp();
@@ -1333,7 +1344,7 @@ async function loadKatalogA(ses){
     setContent(`
     <div class="ph"><span class="ey">Katalog</span><h1>Katalog Jadwal Praktikum</h1></div>
     <p style="margin-bottom:18px;font-size:13px;color:var(--muted);max-width:560px;line-height:1.65;">
-      Daftar jadwal praktikum semua aslab — hanya lihat. Maksimal ${MAX_ASLAB_PER_SLOT} aslab per sesi per tanggal; slot yang masih kosong dapat diisi di halaman Jadwal.
+      Daftar jadwal praktikum semua aslab — hanya lihat. Maksimal ${MAX_KELOMPOK_PER_SESI} kelompok per sesi per tanggal; slot yang masih kosong dapat diisi di halaman Jadwal.
     </p>
     <div style="display:flex;gap:8px;margin-bottom:18px;">
       <button type="button" class="btn btn-sm" id="katalog-tab-tanggal" onclick="setKatalogView('tanggal')">Per Tanggal</button>
@@ -1395,15 +1406,15 @@ function renderKatalogTanggal(){
           const names = bySesi.get(sesi) || [];
           const filled = names.length;
           const slots = names.slice();
-          while (slots.length < MAX_ASLAB_PER_SLOT) slots.push(null);
+          while (slots.length < MAX_KELOMPOK_PER_SESI) slots.push(null);
           const tagsHtml = slots.map(n => n
             ? `<span class="tag green" style="margin:2px 6px 2px 0;">${esc(n)}</span>`
             : `<span class="tag" style="margin:2px 6px 2px 0;opacity:.55;">Kosong</span>`).join('');
-          const chipCls = filled >= MAX_ASLAB_PER_SLOT ? 'amber' : 'blue';
+          const chipCls = filled >= MAX_KELOMPOK_PER_SESI ? 'amber' : 'blue';
           return `<tr>
             <td style="font-weight:600;white-space:nowrap;">${esc(sesi)}</td>
             <td>${tagsHtml}</td>
-            <td style="text-align:right;white-space:nowrap;"><span class="tag ${chipCls}" style="font-size:11px;">${filled}/${MAX_ASLAB_PER_SLOT}</span></td>
+            <td style="text-align:right;white-space:nowrap;"><span class="tag ${chipCls}" style="font-size:11px;">${filled}/${MAX_KELOMPOK_PER_SESI}</span></td>
           </tr>`;
         }).join('')}</tbody>
       </table></div>
@@ -1683,21 +1694,20 @@ async function aStuChange(sel){
     const{grades}=await api('getGrades',{username:sel.value,judul});
     const g=grades[0]||{};
     const u=(window._aUsers||[]).find(x=>x.username===sel.value);
-    const total=hitungTotal(g);
     wrap.innerHTML=`
     <div class="card">
       <h3 style="margin-bottom:20px;">Nilai untuk ${u?esc(u.name):esc(sel.value)}</h3>
       <form onsubmit="submitNilaiA(event,'${escAttr(sel.value)}','${escAttr(judul)}','${escAttr(setBy)}')">
         <div class="total-preview">
-          <div class="label">Total Akhir (auto-hitung)</div>
-          <div class="score" id="total-preview-val">${total?total.toFixed(2):'—'}</div>
+          <div class="label">Total Akhir (pratinjau)</div>
+          <div class="score" id="total-preview-val">${totalDisplay(g)}</div>
         </div>
         <div class="nform-grid">
           ${KOMP.map(k=>`
           <div class="nform-row">
             <div class="nform-label"><b>${k.label}</b><span>Bobot ${k.bobot}%</span></div>
             <div class="nform-num"><input type="number" name="${k.key}" min="0" max="100"
-              value="${g[k.key]||''}" placeholder="—" oninput="updateTotal(this.form)"></div>
+              value="${nilaiVal(g[k.key])}" placeholder="—" oninput="updateTotal(this.form)"></div>
             <div class="nform-cat"><textarea name="${k.cat}"
               placeholder="Catatan…" rows="1">${esc(g[k.cat]||'')}</textarea></div>
           </div>`).join('')}
@@ -1723,6 +1733,13 @@ async function submitNilaiA(e,username,judul,setBy){
     await api('setGrade',body);
     CACHE={};APP.grades=null;
     toast('Nilai & catatan tersimpan.');
+    // Jaring pengaman: ambil nilaiAkhir dari server & set pratinjau (Tugas 1.6).
+    try {
+      const { grades: g2 } = await api('getGrades',{username,judul});
+      const sv = g2 && g2[0] && g2[0].nilaiAkhir;
+      const el = document.getElementById('total-preview-val');
+      if (el && sv !== undefined && sv !== null && sv !== '') el.textContent = parseFloat(sv).toFixed(2);
+    } catch(_) { /* pratinjau lokal sudah cukup; abaikan */ }
     // refresh rekap E1-E10 (pengganti riwayat per-modul lama)
     refreshRekapNilai();
   }catch(err){toast('Gagal: '+err.message);}
@@ -1795,10 +1812,16 @@ async function adStuChange(sel){
     <div class="tw">
       <table>
       <thead><tr><th>Judul</th>${KOMP.map(k=>`<th>${k.label}<br><small style="font-weight:400;color:var(--muted)">${k.bobot}%</small></th>`).join('')}<th>Total</th><th>Aksi</th></tr></thead>
-      <tbody>${mods.map(m=>{const g=grades.find(x=>x.judul===m.id||x.judul===m.judul)||{};const total=g.nilaiAkhir||hitungTotal(g)||null;const hasNilai=!!total||KOMP.some(k=>g[k.key]!==undefined&&g[k.key]!=='');
+      <tbody>${mods.map(m=>{const g=grades.find(x=>x.judul===m.id||x.judul===m.judul)||{};
+        const hasNilaiServer = g.nilaiAkhir !== undefined && g.nilaiAkhir !== null && g.nilaiAkhir !== '';
+        const total = hasNilaiServer ? g.nilaiAkhir : hitungTotal(g);
+        const adaKomponen = KOMP.some(k => k.key !== 'keterlambatan'
+          && g[k.key] !== undefined && g[k.key] !== null && g[k.key] !== '');
+        const sudahDinilai = hasNilaiServer || adaKomponen;
+        const hasNilai = sudahDinilai;
         return`<tr><td style="font-weight:500">${esc(m.judul)}</td>
           ${KOMP.map(k=>`<td>${g[k.key]!==undefined&&g[k.key]!==''?g[k.key]:'—'}</td>`).join('')}
-          <td>${total?`<span class="score-chip ${scoreClass(total)}">${parseFloat(total).toFixed(2)}</span>`:'—'}</td>
+          <td>${sudahDinilai?`<span class="score-chip ${scoreClass(total)}">${parseFloat(total).toFixed(2)}</span>`:'—'}</td>
           <td style="white-space:nowrap;">
             <button type="button" class="btn btn-sm btn-primary" style="padding:0 10px;font-size:11px;" onclick="openAdminNilaiForm('${escAttr(sel.value)}','${escAttr(m.judul)}')">Edit</button>
             ${hasNilai?`<button type="button" class="btn btn-sm btn-danger" style="margin-left:4px;padding:0 8px;font-size:11px;" onclick="hapusAdminNilai('${escAttr(sel.value)}','${escAttr(m.judul)}')">Hapus</button>`:''}
@@ -1816,7 +1839,6 @@ function openAdminNilaiForm(username, judul){
   const setBy = (window._adSes && window._adSes.username) || 'admin';
   const g=(window._adGrades||[]).find(x=>x.judul===judul&&(x.username===username))||{};
   const u=(window._adUsers||[]).find(x=>x.username===username);
-  const total=hitungTotal(g);
   document.getElementById('modal-root').innerHTML=`
   <div class="modal-back" id="anf-back">
     <div class="modal" style="max-width:860px;">
@@ -1825,15 +1847,15 @@ function openAdminNilaiForm(username, judul){
       <p style="font-size:13px;color:var(--muted);margin-bottom:18px;">${esc(judul)}</p>
       <form onsubmit="submitAdminNilai(event,'${escAttr(username)}','${escAttr(judul)}','${escAttr(setBy)}')">
         <div class="total-preview">
-          <div class="label">Total Akhir (auto-hitung server)</div>
-          <div class="score" id="anf-total">${total?total.toFixed(2):'—'}</div>
+          <div class="label">Total Akhir (pratinjau)</div>
+          <div class="score" id="anf-total">${totalDisplay(g)}</div>
         </div>
         <div class="nform-grid">
           ${KOMP.map(k=>`
           <div class="nform-row">
             <div class="nform-label"><b>${k.label}</b><span>Bobot ${k.bobot}%</span></div>
             <div class="nform-num"><input type="number" name="${k.key}" min="0" max="100"
-              value="${g[k.key]||''}" placeholder="—" oninput="updateAdminTotal(this.form)"></div>
+              value="${nilaiVal(g[k.key])}" placeholder="—" oninput="updateAdminTotal(this.form)"></div>
             <div class="nform-cat"><textarea name="${k.cat}" placeholder="Catatan…" rows="1">${esc(g[k.cat]||'')}</textarea></div>
           </div>`).join('')}
         </div>
@@ -1845,9 +1867,9 @@ function openAdminNilaiForm(username, judul){
   setupInputNilaiKeys(document.querySelector('#modal-root form'), 'anf-save');
 }
 function updateAdminTotal(form){
-  const fd=new FormData(form);let total=0;
-  KOMP.forEach(k=>{const v=parseFloat(fd.get(k.key));if(!isNaN(v)&&k.bobot>0)total+=v*(k.bobot/100);});
-  document.getElementById('anf-total').textContent=(Math.round(total*100)/100).toFixed(2);
+  const el = document.getElementById('anf-total');
+  if (!el) return;
+  el.textContent = hitungTotalDariForm(form).toFixed(2);
 }
 async function submitAdminNilai(e,username,judul,setBy){
   e.preventDefault();const fd=new FormData(e.target);
@@ -1981,7 +2003,7 @@ function openAdminJadwalEdit(idx, moduleId, kelompok){
         <div class="mfield"><label>Aslab pemegang slot</label>
           <select name="setBy">${aslabOpts}</select></div>
         <div class="mfield"><label>Tanggal</label>
-          <input type="date" name="tanggal" value="${r.tanggal||''}" required onchange="this.form.sesi&&0"></div>
+          <input type="date" name="tanggal" value="${r.tanggal||''}" required></div>
         <div class="mfield"><label>Sesi</label>
           <select name="sesi">${SESI.map(x=>`<option value="${esc(x)}" ${x===r.sesi?'selected':''}>${esc(x)}</option>`).join('')}</select></div>
         <button type="submit" class="btn btn-primary btn-block" id="aje-save" style="height:46px;margin-top:8px;">Simpan</button>
@@ -2009,8 +2031,8 @@ async function submitAdminJadwalEdit(e, moduleId, kelompok){
     closeModal();
     loadAdminJadwal(window._adJadwalState.ses);
   }catch(err){
-    if(/sudah penuh|maksimal 3 aslab/i.test(err.message)){
-      toast('Slot ini sudah penuh (maks 3 aslab per tanggal). Pilih sesi/tanggal lain.');
+    if(/sudah penuh|maksimal 3 kelompok/i.test(err.message)){
+      toast('Slot ini sudah penuh (maks 3 kelompok per tanggal). Pilih sesi/tanggal lain.');
     }else{
       toast('Gagal: '+err.message);
     }
