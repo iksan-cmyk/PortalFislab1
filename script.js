@@ -1122,17 +1122,17 @@ function renderAslab(hash,ses){const path=hash||'/a/jadwal';buildNav(NAV_A,path)
 
 const SESI = ['07.00-08.40','09.00-10.40','11.00-12.40','13.30-15.10','15.30-17.10','18.30-20.20'];
 const MAX_KELOMPOK_PER_SESI = 3; // batas umum trigger DB (0016_perbaikan_aturan_jadwal.sql)
-// _jadwalE3E9: array jadwal lintas-aslab dari RPC getJadwalKelompokModul (punya moduleId & kelompok).
-// Diisi saat loadJadwalA; dipakai terisiCount & cekAturanE3E9Client. (Tugas 3.2)
-window._jadwalE3E9 = null;
+// _jadwalSesi: array jadwal lintas-aslab dari RPC getJadwalKelompokModul (punya moduleId & kelompok).
+// Diisi saat loadJadwalA; dipakai terisiCount & cekBatasSesiClient.
+window._jadwalSesi = null;
 function getSesiOptions(tanggal){
   return SESI;
 }
 // terisiCount: hitung baris jadwal LAIN di slot yang sama, exclude baris sendiri (own).
-// own = {moduleId, kelompok}. Mengambil data dari window._jadwalE3E9 (Tugas 3.2).
+// own = {moduleId, kelompok}. Mengambil data dari window._jadwalSesi.
 function terisiCount(tanggal, sesi, own){
-  if(!Array.isArray(window._jadwalE3E9) || !tanggal) return 0;
-  return window._jadwalE3E9.filter(j =>
+  if(!Array.isArray(window._jadwalSesi) || !tanggal) return 0;
+  return window._jadwalSesi.filter(j =>
     j.tanggal === tanggal && j.sesi === sesi &&
     !(own && j.moduleId === own.moduleId && +j.kelompok === +own.kelompok)
   ).length;
@@ -1191,13 +1191,13 @@ async function loadJadwalA(ses){
     const schedules = allSchedules.flat();
 
     // ambil jadwal lintas-aslab dengan module_id + kelompok (RPC 0011) untuk
-    // indikator terisi (Tugas 3.2) & pra-pengecekan aturan E3/E9 di sisi klien.
+    // indikator terisi & pra-pengecekan batas umum 3 kelompok di sisi klien.
     // Gagal ambil -> indikator & pra-cek nonaktif; trigger DB tetap sumber kebenaran.
     // Halaman Katalog tetap memakai getKatalogJadwal (tidak diubah di sini).
     try {
       const { jadwal: jadwalAll } = await api('getJadwalKelompokModul');
-      window._jadwalE3E9 = jadwalAll || [];
-    } catch(_) { window._jadwalE3E9 = null; }
+      window._jadwalSesi = jadwalAll || [];
+    } catch(_) { window._jadwalSesi = null; }
 
     setContent(`
     <div class="ph"><span class="ey">Pengaturan</span><h1>Jadwal Praktikum</h1></div>
@@ -1242,54 +1242,29 @@ async function loadJadwalA(ses){
     }).join('')}`);
   }catch(e){setContent(`<p style="color:red">${esc(e.message)}</p>`);}
 }
-/* — cekAturanE3E9Client: pra-pengecekan aturan jadwal di sisi klien memakai
-   data jadwal lintas-aslab (window._jadwalE3E9 dari RPC getJadwalKelompokModul).
-   Return pesan error (string) bila melanggar, atau null bila OK.
-   Mengecualikan baris sendiri (module_id + kelompok yang sama) karena upsert
-   menggantikan baris itu. Trigger DB (0016) tetap cadangan untuk race condition.
-   Aturan (Tugas 3.1):
-     - umum: maksimal 3 kelompok per sesi.
-     - E3: maksimal 2 kelompok E3 per sesi.
-     - E9: maksimal 1 kelompok E9 per sesi.
-   Tidak ada lagi larangan "E3 bersama judul lain" / "judul lain di sesi E3". — */
-function cekAturanE3E9Client(tanggal, sesi, judul, kelompokId){
+/* — cekBatasSesiClient: pra-pengecekan batas umum 3 kelompok per sesi di sisi
+   klien memakai data jadwal lintas-aslab (window._jadwalSesi dari RPC
+   getJadwalKelompokModul). Return pesan error (string) bila melanggar, atau
+   null bila OK. Mengecualikan baris sendiri (module_id + kelompok yang sama)
+   karena upsert menggantikan baris itu. Trigger DB (cek_batas_aslab_jadwal,
+   0009/0016) tetap cadangan untuk race condition.
+   Aturan: maksimal 3 kelompok per sesi — satu-satunya aturan jadwal. — */
+function cekBatasSesiClient(tanggal, sesi, judul, kelompokId){
   if(!tanggal || !sesi) return null;
+  if(!Array.isArray(window._jadwalSesi)) return null; // data tidak tersedia -> biarkan DB
   const mods = APP.modules || [];
   const mod = mods.find(m => m.judul === judul);
-  if(!mod) return null; // tidak ketahui kode -> skip pra-cek, biarkan DB
-  const kode = (mod.kode || '').toUpperCase().trim();
-  const jadwal = window._jadwalE3E9;
-  if(!Array.isArray(jadwal)) return null; // data tidak tersedia -> biarkan DB
-  const kodeOf = (mid) => {
-    const m = mods.find(x => x.id === mid);
-    return m ? (m.kode || '').toUpperCase().trim() : '';
-  };
-  const sameSlot = jadwal.filter(j =>
-    j.tanggal === tanggal && j.sesi === sesi &&
-    !(j.moduleId === mod.id && +j.kelompok === +kelompokId)
-  );
-  // a) Batas umum 3 kelompok per sesi.
-  if(sameSlot.length >= MAX_KELOMPOK_PER_SESI)
+  if(!mod) return null; // tidak ketahui moduleId -> skip pra-cek, biarkan DB
+  const c = terisiCount(tanggal, sesi, { moduleId: mod.id, kelompok: kelompokId });
+  if(c >= MAX_KELOMPOK_PER_SESI)
     return 'Jadwal ini sudah penuh: maksimal 3 kelompok per sesi.';
-  // b) E3 maksimal 2.
-  if(kode === 'E3'){
-    const e3Lain = sameSlot.filter(j => kodeOf(j.moduleId) === 'E3');
-    if(e3Lain.length >= 2)
-      return 'Sesi ini sudah memiliki 2 kelompok E3 (maksimal 2 per sesi).';
-  }
-  // c) E9 maksimal 1.
-  if(kode === 'E9'){
-    const e9Lain = sameSlot.filter(j => kodeOf(j.moduleId) === 'E9');
-    if(e9Lain.length >= 1)
-      return 'Sesi ini sudah memiliki 1 kelompok E9 (maksimal 1 per sesi).';
-  }
   return null;
 }
 async function submitJadwal(e,kelompokId,judul,setBy){
   e.preventDefault();const fd=new FormData(e.target);const btn=e.target.querySelector('button[type=submit]');
   btn.disabled=true;btn.textContent='Menyimpan…';
-  // Pra-pengecekan aturan jadwal di sisi klien (Tugas 3.4).
-  const cekErr = cekAturanE3E9Client(fd.get('tanggal'), fd.get('sesi'), judul, +kelompokId);
+  // Pra-pengecekan batas umum 3 kelompok per sesi di sisi klien.
+  const cekErr = cekBatasSesiClient(fd.get('tanggal'), fd.get('sesi'), judul, +kelompokId);
   if(cekErr){ toast(cekErr); btn.disabled=false; btn.textContent='Simpan'; return; }
   try{
     await api('setSchedule',
@@ -1300,11 +1275,12 @@ async function submitJadwal(e,kelompokId,judul,setBy){
     toast(`Jadwal kelompok ${kelompokId} tersimpan.`);renderApp();
   }
   catch(err){
-    // Race condition: dua aslab submit bersamaan, trigger DB (0016) menolak.
+    // Race condition: dua aslab submit bersamaan, trigger DB
+    // (cek_batas_aslab_jadwal) menolak.
     // Tangkap, beri pesan jelas, lalu refresh data opsi supaya indikator sinkron lagi.
-    if (/sudah penuh|maksimal 3 kelompok|2 kelompok E3|1 kelompok E9/i.test(err.message)) {
+    if (/sudah penuh|maksimal 3 kelompok/i.test(err.message)) {
       toast(err.message);
-      window._jadwalE3E9 = null; // paksa ambil ulang data jadwal
+      window._jadwalSesi = null; // paksa ambil ulang data jadwal
       renderApp();
     } else {
       toast('Gagal: '+err.message);btn.disabled=false;btn.textContent='Simpan';

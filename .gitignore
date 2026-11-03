@@ -20,9 +20,6 @@ migration/*.csv
 .vercel/
 dist/
 
-# File konfigurasi internal agent - jangan pernah commit (dihapus dari histori git).
+# File konfigurasi & dokumen internal agent (vibecoding) - jangan pernah commit.
 AGENTS.md
-RENCANA_PERUBAHAN_v4.md
-RENCANA_PERUBAHAN_v5.md
-RENCANA_PERUBAHAN_v6.md
-RENCANA_PERUBAHAN_v8.md
+RENCANA_PERUBAHAN_*.md

@@ -14,7 +14,7 @@ diamankan sepenuhnya lewat Row Level Security (RLS) Postgres.
 - **Backend + DB + Auth + Storage:** Supabase (free tier) — Postgres, Auth,
   RLS, Storage bucket `avatars`.
 - **Frontend hosting:** Vercel (free tier) — static site apa adanya.
-- **Login:** username → email sintetis `{username}@portalfislab.local`,
+- **Login:** username → email sintetis `{username}@student.its.ac.id`,
   password di-hash & di-rate-limit bawaan Supabase Auth.
 
 Tidak ada server Node/Express terpisah. Logika yang wajib server-side
@@ -101,6 +101,15 @@ FK di `rotasi`/`schedules`/`grades`) — `id` **tidak boleh** dipakai untuk
 Frontend memanggil `.order('urutan')` di `apiGetModules()` (lihat
 `script.js`). Backfill awal mengambil angka dari `kode` (E1 → 1, E10 → 10);
 migration: `supabase/migrations/0007_modules_urutan.sql`.
+
+## Aturan jadwal
+
+Satu-satunya aturan jadwal: **maksimal 3 kelompok per (tanggal, sesi)** —
+berlaku untuk semua judul/modul tanpa kecuali (termasuk E3 & E9), ditegakkan
+server-side oleh trigger `trg_batas_aslab_jadwal` (fungsi
+`cek_batas_aslab_jadwal()`, `0009`, diperbarui `0016`). Tidak ada lagi aturan
+khusus E3/E9 (maks 2 E3 / maks 1 E9 per sesi — dihapus di `0017`): aslab
+bebas memilih tanggal & sesi untuk judul apa pun.
 
 ## Keamanan
 
