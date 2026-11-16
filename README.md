@@ -127,3 +127,17 @@ Ringkasan singkat — detail lengkap dan justifikasi ada di
 - Escape HTML di semua tempat yang merender teks input pengguna (helper `esc`).
 - Upload foto profil dibatasi tipe (`image/*`) & ukuran (maks 2MB), disimpan
   di Storage bucket `avatars` (bukan base64 di DB).
+
+## Audit log
+
+Setiap perubahan (UPDATE) dan penghapusan (DELETE) pada `schedules` dan
+`grades` tercatat otomatis di tabel `public.audit_log` (migrasi `0019`): satu
+baris berisi tabel yang berubah, aksi (`UPDATE`/`DELETE`), snapshot `row_lama`
+dan `row_baru` (JSON), siapa (`actor_uid`/`actor_username`), peran dari klaim
+JWT (`actor_role`), kapan, dan role koneksi DB (`db_user` = `session_user`).
+Perubahan yang tidak mengubah isi (hanya `updated_at`) tidak dicatat supaya
+tidak jadi noise. Hanya role **admin** yang boleh membacanya lewat RLS; untuk
+menelusuri kasus "jadwal bergeser/terhapus" atau "nilai hilang", admin query
+`SELECT * FROM public.audit_log ORDER BY id DESC` untuk melihat persis apa yang
+berubah dan kapan. Perubahan lewat `service_role` (skrip di `migration/`) atau
+RPC admin ikut tercatat dengan `actor_uid`/`actor_role` NULL.

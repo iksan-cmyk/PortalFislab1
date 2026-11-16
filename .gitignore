@@ -23,3 +23,5 @@ dist/
 # File konfigurasi & dokumen internal agent (vibecoding) - jangan pernah commit.
 AGENTS.md
 RENCANA_PERUBAHAN_*.md
+# Laporan audit internal agent - jangan pernah commit.
+LAPORAN_AUDIT_*.md
