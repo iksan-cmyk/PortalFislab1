@@ -362,22 +362,44 @@ async function apiGetRotasi(body) {
 async function apiSetSchedule(body) {
   const moduleId = await getModuleIdByJudul(body.judul);
   const kelompok = parseInt(body.kelompokId);
+  const updatedAt = body.updatedAt || null; // updated_at yang dibaca saat form dimuat (C1)
+  const CONFLICT = 'Data sudah diubah orang lain, muat ulang halaman';
+  const rec = {
+    module_id: moduleId,
+    kelompok,
+    tanggal: body.tanggal,
+    sesi: body.sesi,
+    set_by: body.setBy,
+    updated_at: new Date().toISOString(),
+  };
+
   if (!body.tanggal) {
-    const { error } = await SB.from('schedules')
+    // Hapus jadwal — pengaman versi bila praktis (updated_at tersedia).
+    let q = SB.from('schedules')
       .delete().eq('module_id', moduleId).eq('kelompok', kelompok);
+    if (updatedAt) q = q.eq('updated_at', updatedAt);
+    const { data, error } = await q.select();
     if (error) throw new Error(error.message);
+    if (updatedAt && (!data || data.length === 0)) throw new Error(CONFLICT);
     return { success: true };
   }
-  const { error } = await SB.from('schedules')
-    .upsert({
-      module_id: moduleId,
-      kelompok,
-      tanggal: body.tanggal,
-      sesi: body.sesi,
-      set_by: body.setBy,
-      updated_at: new Date().toISOString(),
-    }, { onConflict: 'module_id,kelompok' });
-  if (error) throw new Error(error.message);
+
+  if (updatedAt) {
+    // Baris sudah ada saat form dibuka — UPDATE dengan pengaman versi (C1).
+    const { data, error } = await SB.from('schedules')
+      .update(rec)
+      .eq('module_id', moduleId).eq('kelompok', kelompok).eq('updated_at', updatedAt)
+      .select('module_id');
+    if (error) throw new Error(error.message);
+    if (!data || data.length === 0) throw new Error(CONFLICT); // 0 baris = data sudah berubah
+  } else {
+    // Baris belum ada saat form dibuka — INSERT; bentrok unique = sudah dibuat orang lain.
+    const { error } = await SB.from('schedules').insert(rec);
+    if (error) {
+      if (/duplicate|unique|23505/i.test(error.message)) throw new Error(CONFLICT);
+      throw new Error(error.message);
+    }
+  }
   return { success: true };
 }
 
@@ -504,9 +526,24 @@ async function apiSetGrade(body) {
     if (body[camel] !== undefined) rec[snake] = body[camel] || null;
   }
   // nilaiAkhir sengaja TIDAK dikirim — trigger recompute_nilai_akhir menghitung ulang di server
-  const { error } = await SB.from('grades')
-    .upsert(rec, { onConflict: 'username,module_id' });
-  if (error) throw new Error(error.message);
+  const updatedAt = body.updatedAt || null; // updated_at yang dibaca saat form dimuat (C1)
+  const CONFLICT = 'Data sudah diubah orang lain, muat ulang halaman';
+  if (updatedAt) {
+    // Baris sudah ada saat form dibuka — UPDATE dengan pengaman versi (C1).
+    const { data, error } = await SB.from('grades')
+      .update(rec)
+      .eq('username', body.username).eq('module_id', moduleId).eq('updated_at', updatedAt)
+      .select('username');
+    if (error) throw new Error(error.message);
+    if (!data || data.length === 0) throw new Error(CONFLICT); // 0 baris = data sudah berubah
+  } else {
+    // Baris belum ada — INSERT; bentrok unique = sudah dibuat orang lain.
+    const { error } = await SB.from('grades').insert(rec);
+    if (error) {
+      if (/duplicate|unique|23505/i.test(error.message)) throw new Error(CONFLICT);
+      throw new Error(error.message);
+    }
+  }
   return { success: true };
 }
 
@@ -1222,6 +1259,7 @@ async function loadJadwalA(ses){
                 ${s?'Terjadwal: '+fmtTgl(s.tanggal)+' · '+esc(s.sesi):'Belum dijadwalkan'}
               </p>
               <form data-modul="${escAttr(mod.id)}" data-kelompok="${escAttr(r.kelompok)}" onsubmit="submitJadwal(event,'${escAttr(r.kelompok)}','${escAttr(mod.judul)}','${escAttr(ses.username)}')">
+                <input type="hidden" name="updatedAt" value="${s?esc(s.updatedAt):''}">
                 <div class="fr">
                   <div class="ff"><label>Tanggal</label>
                 <input type="date" name="tanggal" value="${s?s.tanggal:''}" required onchange="updateSesiOptions(this)"></div>
@@ -1232,7 +1270,7 @@ async function loadJadwalA(ses){
                 <div style="margin-top:12px;display:flex;gap:10px;">
                   <button type="submit" class="btn btn-primary btn-sm">Simpan</button>
                   ${s?`<button type="button" class="btn btn-ghost-dk btn-sm"
-                    onclick="hapusJadwal('${escAttr(r.kelompok)}','${escAttr(mod.judul)}','${escAttr(ses.username)}')">Hapus</button>`:''}
+                    onclick="hapusJadwal('${escAttr(r.kelompok)}','${escAttr(mod.judul)}','${escAttr(ses.username)}','${escAttr(s.updatedAt)}')">Hapus</button>`:''}
                 </div>
               </form>
             </div>`;
@@ -1269,16 +1307,20 @@ async function submitJadwal(e,kelompokId,judul,setBy){
   try{
     await api('setSchedule',
     {kelompokId:+kelompokId,judul,tanggal:fd.get('tanggal'),
-    sesi:fd.get('sesi'),setBy});
+    sesi:fd.get('sesi'),setBy,updatedAt:fd.get('updatedAt')||null});
     CACHE = {};
     APP.schedules = null;
     toast(`Jadwal kelompok ${kelompokId} tersimpan.`);renderApp();
   }
   catch(err){
+    // Perubahan oleh orang lain / data usang (C1 optimistic concurrency)
+    if (/Data sudah diubah orang lain/i.test(err.message)) {
+      toast(err.message); btn.disabled=false; btn.textContent='Simpan';
+    }
     // Race condition: dua aslab submit bersamaan, trigger DB
     // (cek_batas_aslab_jadwal) menolak.
     // Tangkap, beri pesan jelas, lalu refresh data opsi supaya indikator sinkron lagi.
-    if (/sudah penuh|maksimal 3 kelompok/i.test(err.message)) {
+    else if (/sudah penuh|maksimal 3 kelompok/i.test(err.message)) {
       toast(err.message);
       window._jadwalSesi = null; // paksa ambil ulang data jadwal
       renderApp();
@@ -1287,10 +1329,13 @@ async function submitJadwal(e,kelompokId,judul,setBy){
     }
   }
 }
-async function hapusJadwal(kelompokId,judul,setBy){
+async function hapusJadwal(kelompokId,judul,setBy,updatedAt){
   if(!confirm(`Hapus jadwal kelompok ${kelompokId}?`))return;
-  try{await api('setSchedule',{kelompokId:+kelompokId,judul,tanggal:'',sesi:'',setBy});toast('Jadwal dihapus.');renderApp();}
-  catch(err){toast('Gagal: '+err.message);}
+  try{await api('setSchedule',{kelompokId:+kelompokId,judul,tanggal:'',sesi:'',setBy,updatedAt:updatedAt||null});toast('Jadwal dihapus.');renderApp();}
+  catch(err){
+    if (/Data sudah diubah orang lain/i.test(err.message)) toast(err.message);
+    else toast('Gagal: '+err.message);
+  }
 }
 
 /* — Katalog Jadwal Praktikum (Task 2): tampil seluruh pilihan jadwal SEMUA aslab,
@@ -1596,6 +1641,7 @@ async function refreshRekapNilai(){
 function aModChange(sel){
   const grp=document.getElementById('a-grp-sel');
   const stu=document.getElementById('a-stu-sel');
+  _aStuReqSeq++; // batalkan aStuChange yang sedang berjalan (C2)
   document.getElementById('a-grade-wrap').innerHTML='';
   // Rekap E1-E10 (pengganti riwayat lama) tetap tampil di a-riwayat-wrap
   // saat modul dipilih — jangan dikosongkan.
@@ -1619,6 +1665,7 @@ function aModChange(sel){
 
 function aGrpChange(sel){
   const stu=document.getElementById('a-stu-sel');
+  _aStuReqSeq++; // batalkan aStuChange yang sedang berjalan (C2)
   document.getElementById('a-grade-wrap').innerHTML='';
   if(!sel.value){stu.disabled=true;stu.innerHTML='<option>Pilih kelompok dahulu</option>';return;}
   const list=(window._aUsers||[]).filter(u=>u.role==='praktikan'&&+u.kelompok===+sel.value);
@@ -1660,20 +1707,27 @@ function setupInputNilaiKeys(form, saveBtnId){
   }, { passive:false });
 }
 
+let _aStuReqSeq = 0; // C2: penjaga urutan permintaan aStuChange
 async function aStuChange(sel){
   const wrap=document.getElementById('a-grade-wrap');
-  if(!sel.value){wrap.innerHTML='';return;}
+  const reqUsername = sel.value; // username yang diminta (C2)
+  if(!reqUsername){wrap.innerHTML='';return;}
   const judul=document.getElementById('a-mod-sel').value;
   const setBy=window._aSes.username;
+  const mySeq = ++_aStuReqSeq;
   wrap.innerHTML=loading('Memuat nilai…');
   try{
-    const{grades}=await api('getGrades',{username:sel.value,judul});
+    const{grades}=await api('getGrades',{username:reqUsername,judul});
+    // C2: jangan render bila ada permintaan lebih baru ATAU pilihan & request berbeda
+    if(mySeq !== _aStuReqSeq || sel.value !== reqUsername) return;
     const g=grades[0]||{};
-    const u=(window._aUsers||[]).find(x=>x.username===sel.value);
+    const u=(window._aUsers||[]).find(x=>x.username===reqUsername);
+    const updatedAt = g.updatedAt || ''; // C1
     wrap.innerHTML=`
     <div class="card">
-      <h3 style="margin-bottom:20px;">Nilai untuk ${u?esc(u.name):esc(sel.value)}</h3>
-      <form onsubmit="submitNilaiA(event,'${escAttr(sel.value)}','${escAttr(judul)}','${escAttr(setBy)}')">
+      <h3 style="margin-bottom:20px;">Nilai untuk ${u?esc(u.name):esc(reqUsername)}</h3>
+      <form onsubmit="submitNilaiA(event,'${escAttr(reqUsername)}','${escAttr(judul)}','${escAttr(setBy)}')">
+        <input type="hidden" name="updatedAt" value="${esc(updatedAt)}">
         <div class="total-preview">
           <div class="label">Total Akhir (pratinjau)</div>
           <div class="score" id="total-preview-val">${totalDisplay(g)}</div>
@@ -1695,30 +1749,40 @@ async function aStuChange(sel){
       </form>
     </div>`;
     setupInputNilaiKeys(wrap.querySelector('form'), 'btn-save-grade');
-  }catch(err){wrap.innerHTML=`<p style="color:red">${esc(err.message)}</p>`;}
+  }catch(err){ if(mySeq === _aStuReqSeq && sel.value === reqUsername) wrap.innerHTML=`<p style="color:red">${esc(err.message)}</p>`; }
 }
 
 async function submitNilaiA(e,username,judul,setBy){
   e.preventDefault();const fd=new FormData(e.target);
   const btn=e.target.querySelector('#btn-save-grade');
   btn.disabled=true;btn.innerHTML='<span class="spinner"></span> Menyimpan…';
-  const body={username,judul,setBy,catatan:fd.get('catatan')||''};
+  const body={username,judul,setBy,catatan:fd.get('catatan')||'',updatedAt:fd.get('updatedAt')||null};
   KOMP.forEach(k=>{body[k.key]=fd.get(k.key)||'';body[k.cat]=fd.get(k.cat)||'';});
   body.nilaiAkhir=hitungTotal(body).toFixed(2);
   try{
     await api('setGrade',body);
     CACHE={};APP.grades=null;
     toast('Nilai & catatan tersimpan.');
-    // Jaring pengaman: ambil nilaiAkhir dari server & set pratinjau (Tugas 1.6).
+    // Jaring pengaman: ambil nilaiAkhir & updated_at TERBARU dari server, lalu
+    // tulis ulang hidden 'updatedAt' di form. Tanpa ini, simpan kedua (termasuk
+    // Enter di baris terakhir) mengirim versi lama → konflik palsu (C1/Verif 2).
     try {
       const { grades: g2 } = await api('getGrades',{username,judul});
-      const sv = g2 && g2[0] && g2[0].nilaiAkhir;
-      const el = document.getElementById('total-preview-val');
-      if (el && sv !== undefined && sv !== null && sv !== '') el.textContent = parseFloat(sv).toFixed(2);
+      const row = g2 && g2[0];
+      if (row) {
+        const sv = row.nilaiAkhir;
+        const el = document.getElementById('total-preview-val');
+        if (el && sv !== undefined && sv !== null && sv !== '') el.textContent = parseFloat(sv).toFixed(2);
+        const upd = e.target.querySelector('input[name="updatedAt"]');
+        if (upd && row.updatedAt) upd.value = row.updatedAt;
+      }
     } catch(_) { /* pratinjau lokal sudah cukup; abaikan */ }
     // refresh rekap E1-E10 (pengganti riwayat per-modul lama)
     refreshRekapNilai();
-  }catch(err){toast('Gagal: '+err.message);}
+  }catch(err){
+    if (/Data sudah diubah orang lain/i.test(err.message)) toast(err.message);
+    else toast('Gagal: '+err.message);
+  }
   finally{btn.disabled=false;btn.innerHTML='Simpan Nilai & Catatan';}
 }
 
@@ -1771,20 +1835,28 @@ async function loadAdminNilai(ses){
   }catch(e){setContent(`<p style="color:red">${esc(e.message)}</p>`);}
 }
 function adGrpChange(sel){
-  const stu=document.getElementById('ad-stu-sel');document.getElementById('ad-grade-wrap').innerHTML='';
+  const stu=document.getElementById('ad-stu-sel');
+  _adStuReqSeq++; // batalkan adStuChange yang sedang berjalan (C2)
+  document.getElementById('ad-grade-wrap').innerHTML='';
   if(!sel.value){stu.disabled=true;stu.innerHTML='<option>Pilih kelompok dahulu</option>';return;}
   const list=(window._adUsers||[]).filter(u=>u.role==='praktikan'&&+u.kelompok===+sel.value);
   stu.disabled=false;stu.innerHTML='<option value="">Pilih praktikan</option>'+list.map(u=>`<option value="${esc(u.username)}">${esc(u.name)}</option>`).join('');
 }
+let _adStuReqSeq = 0; // C2: penjaga urutan permintaan adStuChange
 async function adStuChange(sel){
-  const wrap=document.getElementById('ad-grade-wrap');if(!sel.value){wrap.innerHTML='';return;}
+  const wrap=document.getElementById('ad-grade-wrap');
+  const reqUsername = sel.value; // username yang diminta (C2)
+  if(!reqUsername){wrap.innerHTML='';return;}
+  const mySeq = ++_adStuReqSeq; // C3: tanpa useCache, data selalu segar
   wrap.innerHTML=loading();
   try{
-    const[mods,{grades}]=await Promise.all([getMods(),api('getGrades',{username:sel.value}, true)]);
-    window._adGradesMods=mods;window._adGrades=grades;window._adStuUsername=sel.value;
-    const u=(window._adUsers||[]).find(x=>x.username===sel.value);
+    const[mods,{grades}]=await Promise.all([getMods(),api('getGrades',{username:reqUsername})]);
+    // C2: jangan render bila ada permintaan lebih baru ATAU pilihan berbeda
+    if(mySeq !== _adStuReqSeq || sel.value !== reqUsername) return;
+    window._adGradesMods=mods;window._adGrades=grades;window._adStuUsername=reqUsername;
+    const u=(window._adUsers||[]).find(x=>x.username===reqUsername);
     wrap.innerHTML=`
-    <div class="ph" style="margin-top:8px;"><span class="ey">Breakdown</span><h1>Nilai ${u?esc(u.name):esc(sel.value)}</h1></div>
+    <div class="ph" style="margin-top:8px;"><span class="ey">Breakdown</span><h1>Nilai ${u?esc(u.name):esc(reqUsername)}</h1></div>
     <div class="tw">
       <table>
       <thead><tr><th>Judul</th>${KOMP.map(k=>`<th>${k.label}<br><small style="font-weight:400;color:var(--muted)">${k.bobot}%</small></th>`).join('')}<th>Total</th><th>Aksi</th></tr></thead>
@@ -1799,22 +1871,28 @@ async function adStuChange(sel){
           ${KOMP.map(k=>`<td>${g[k.key]!==undefined&&g[k.key]!==''?g[k.key]:'—'}</td>`).join('')}
           <td>${sudahDinilai?`<span class="score-chip ${scoreClass(total)}">${parseFloat(total).toFixed(2)}</span>`:'—'}</td>
           <td style="white-space:nowrap;">
-            <button type="button" class="btn btn-sm btn-primary" style="padding:0 10px;font-size:11px;" onclick="openAdminNilaiForm('${escAttr(sel.value)}','${escAttr(m.judul)}')">Edit</button>
-            ${hasNilai?`<button type="button" class="btn btn-sm btn-danger" style="margin-left:4px;padding:0 8px;font-size:11px;" onclick="hapusAdminNilai('${escAttr(sel.value)}','${escAttr(m.judul)}')">Hapus</button>`:''}
+            <button type="button" class="btn btn-sm btn-primary" style="padding:0 10px;font-size:11px;" onclick="openAdminNilaiForm('${escAttr(reqUsername)}','${escAttr(m.judul)}')">Edit</button>
+            ${hasNilai?`<button type="button" class="btn btn-sm btn-danger" style="margin-left:4px;padding:0 8px;font-size:11px;" onclick="hapusAdminNilai('${escAttr(reqUsername)}','${escAttr(m.judul)}')">Hapus</button>`:''}
           </td>
         </tr>`;}).join('')}
       </tbody></table></div>
       <p style="margin-top:14px;font-size:12px;color:var(--muted);">Klik <b>Edit</b> untuk input/mengubah nilai modul mana pun. <b>Hapus</b> menghapus seluruh nilai + catatan untuk modul tersebut.</p>`;
-  }catch(err){wrap.innerHTML=`<p style="color:red">${esc(err.message)}</p>`;}
+  }catch(err){ if(mySeq === _adStuReqSeq && sel.value === reqUsername) wrap.innerHTML=`<p style="color:red">${esc(err.message)}</p>`; }
 }
 
 /* — openAdminNilaiForm: modal form input nilai (admin, full power untuk
    kombinasi praktikan+modul apa pun). Reuse pola form aslab (aStuChange),
-   nilaiAkhir dihitung trigger di server. — */
-function openAdminNilaiForm(username, judul){
+   nilaiAkhir dihitung trigger di server. Data diambil SEGAR saat tombol Edit
+   diklik (C3), bukan dari cache window._adGrades yang bisa basi. — */
+async function openAdminNilaiForm(username, judul){
   const setBy = (window._adSes && window._adSes.username) || 'admin';
-  const g=(window._adGrades||[]).find(x=>x.judul===judul&&(x.username===username))||{};
   const u=(window._adUsers||[]).find(x=>x.username===username);
+  let g={};
+  try {
+    const { grades } = await api('getGrades',{username, judul});
+    g = (grades && grades[0]) || {};
+  } catch(err) { toast('Gagal memuat nilai: '+err.message); return; }
+  const updatedAt = g.updatedAt || ''; // C1
   document.getElementById('modal-root').innerHTML=`
   <div class="modal-back" id="anf-back">
     <div class="modal" style="max-width:860px;">
@@ -1822,6 +1900,7 @@ function openAdminNilaiForm(username, judul){
       <h3>Input Nilai — ${u?esc(u.name):esc(username)}</h3>
       <p style="font-size:13px;color:var(--muted);margin-bottom:18px;">${esc(judul)}</p>
       <form onsubmit="submitAdminNilai(event,'${escAttr(username)}','${escAttr(judul)}','${escAttr(setBy)}')">
+        <input type="hidden" name="updatedAt" value="${esc(updatedAt)}">
         <div class="total-preview">
           <div class="label">Total Akhir (pratinjau)</div>
           <div class="score" id="anf-total">${totalDisplay(g)}</div>
@@ -1850,16 +1929,20 @@ function updateAdminTotal(form){
 async function submitAdminNilai(e,username,judul,setBy){
   e.preventDefault();const fd=new FormData(e.target);
   const btn=document.getElementById('anf-save');btn.disabled=true;btn.innerHTML='<span class="spinner"></span> Menyimpan…';
-  const body={username,judul,setBy};
+  const body={username,judul,setBy,updatedAt:fd.get('updatedAt')||null};
   KOMP.forEach(k=>{body[k.key]=fd.get(k.key)||'';body[k.cat]=fd.get(k.cat)||'';});
   try{
     await api('setGrade',body);
     CACHE={};
     toast('Nilai & catatan tersimpan.');
     closeModal();
-    // refresh tabel breakdown
+    // refresh tabel breakdown (tanpa cache, C3)
     const sel=document.getElementById('ad-stu-sel');if(sel&&sel.value)adStuChange(sel);
-  }catch(err){toast('Gagal: '+err.message);btn.disabled=false;btn.innerHTML='Simpan Nilai & Catatan';}
+  }catch(err){
+    if (/Data sudah diubah orang lain/i.test(err.message)) toast(err.message);
+    else toast('Gagal: '+err.message);
+    btn.disabled=false;btn.innerHTML='Simpan Nilai & Catatan';
+  }
 }
 async function hapusAdminNilai(username, judul){
   if(!confirm(`Hapus nilai & catatan "${judul}" untuk praktikan ini? Tidak bisa dikembalikan.`))return;
@@ -1976,6 +2059,7 @@ function openAdminJadwalEdit(idx, moduleId, kelompok){
       <h3>Edit Jadwal</h3>
       <p style="font-size:13px;color:var(--muted);margin-bottom:18px;">${esc(r.kode||'')} — ${esc(r.judul)} · Kelompok ${esc(r.kelompok)}</p>
       <form onsubmit="submitAdminJadwalEdit(event,'${escAttr(moduleId)}','${escAttr(kelompok)}')">
+        <input type="hidden" name="updatedAt" value="${r.updatedAt?esc(r.updatedAt):''}">
         <div class="mfield"><label>Aslab pemegang slot</label>
           <select name="setBy">${aslabOpts}</select></div>
         <div class="mfield"><label>Tanggal</label>
@@ -2000,14 +2084,17 @@ async function submitAdminJadwalEdit(e, moduleId, kelompok){
     await api('setSchedule',{
       kelompokId:+kelompok, judul,
       tanggal:fd.get('tanggal'), sesi:fd.get('sesi'),
-      setBy:fd.get('setBy'),
+      setBy:fd.get('setBy'), updatedAt:fd.get('updatedAt')||null,
     });
     CACHE={};
     toast('Jadwal diperbarui.');
     closeModal();
     loadAdminJadwal(window._adJadwalState.ses);
   }catch(err){
-    if(/sudah penuh|maksimal 3 kelompok/i.test(err.message)){
+    if (/Data sudah diubah orang lain/i.test(err.message)){
+      toast(err.message);
+    }
+    else if(/sudah penuh|maksimal 3 kelompok/i.test(err.message)){
       toast('Slot ini sudah penuh (maks 3 kelompok per tanggal). Pilih sesi/tanggal lain.');
     }else{
       toast('Gagal: '+err.message);
@@ -2017,16 +2104,37 @@ async function submitAdminJadwalEdit(e, moduleId, kelompok){
 }
 
 /* — Hapus jadwal (admin) dengan modal konfirmasi EKSPLISIT. Cascade delete
-   nilai terkait via RPC admin_hapus_jadwal (transaksi atomik). — */
-function openAdminJadwalHapus(moduleId, kelompok, judul, kelompokDisp){
+   nilai terkait via RPC admin_hapus_jadwal (transaksi atomik).
+   C4: tampilkan jumlah nilai + nama praktikan yang akan terhapus, tanpa
+   mengubah RPC admin_hapus_jadwal. — */
+async function openAdminJadwalHapus(moduleId, kelompok, judul, kelompokDisp){
+  // Hitung nilai yang akan terdampak (replikasi himpunan subquery admin_hapus_jadwal:
+  // grades module ini untuk praktikan yang profiles.kelompok == kelompok).
+  let affected = 0;
+  let names = [];
+  try {
+    const [profRes, gradeRes] = await Promise.all([
+      SB.from('profiles').select('username,name').eq('role','praktikan').eq('kelompok', parseInt(kelompok,10)),
+      SB.from('grades').select('username').eq('module_id', moduleId),
+    ]);
+    if (!profRes.error && !gradeRes.error) {
+      const profSet = new Set((profRes.data||[]).map(p=>p.username));
+      affected = (gradeRes.data||[]).filter(g=>profSet.has(g.username)).length;
+      names = (profRes.data||[])
+        .filter(p=>p.username && (gradeRes.data||[]).some(g=>g.username===p.username))
+        .map(p=>p.name);
+    }
+  } catch(_) { /* biarkan tetap tampil dengan info default */ }
+  const previewNama = names.length ? names.slice(0,8).join(', ') + (names.length>8?' …':'') : '—';
   document.getElementById('modal-root').innerHTML=`
   <div class="modal-back" id="ajh-back">
     <div class="modal" style="max-width:460px;">
       <button class="modal-close" onclick="closeModal()">✕</button>
       <h3>Hapus Jadwal?</h3>
       <div class="merr" style="background:rgba(239,68,68,.10);border-color:rgba(239,68,68,.4);margin:14px 0 18px;">
-        Menghapus jadwal <b>${esc(judul)}</b> (Kelompok ${esc(kelompokDisp)}) juga akan menghapus <b>nilai yang sudah diinput</b> untuk slot ini. Operasi ini tidak bisa dibatalkan.
+        Menghapus jadwal <b>${esc(judul)}</b> (Kelompok ${esc(kelompokDisp)}) juga akan menghapus <b>${affected} nilai</b> yang sudah diinput untuk slot ini. Operasi ini tidak bisa dibatalkan.
       </div>
+      <p style="font-size:12px;color:var(--muted);margin:-6px 0 14px;line-height:1.5;">Praktikan terdampak: ${esc(previewNama)}</p>
       <div style="display:flex;gap:10px;">
         <button type="button" class="btn btn-ghost-dk" style="flex:1;height:46px;" onclick="closeModal()">Batal</button>
         <button type="button" class="btn btn-danger" style="flex:1;height:46px;border:1.5px solid #ef4444;background:#ef4444;color:#fff;" id="ajh-confirm" onclick="confirmAdminJadwalHapus('${escAttr(moduleId)}','${escAttr(kelompok)}')">Hapus</button>
