@@ -237,6 +237,8 @@ Praktikum berikut belum lengkap dinilai:
 ${list}
 
 Mohon segera dilengkapi. Terima kasih.`;
-  const num = wa.startsWith('0') ? '62' + wa.slice(1) : wa;
+  // Normalisasi nomor: buang karakter non-digit, lalu tambahkan awalan 62 bila diawali 0.
+  let num = wa.replace(/\D/g, '');
+  if (num.startsWith('0')) num = '62' + num.slice(1);
   window.open(`https://wa.me/${num}?text=${encodeURIComponent(pesan)}`, '_blank');
 }
