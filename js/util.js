@@ -10,7 +10,7 @@ const getSession  = () => {
     } 
   };
 const setSession  = u  => localStorage.setItem(SES_KEY, JSON.stringify(u));
-const clearSession     = () => localStorage.removeItem(SES_KEY);
+const clearSession     = () => { localStorage.removeItem(SES_KEY); window._aksesPemantauan = undefined; };
 let CACHE = {};
 const CACHE_TTL = 5 * 60 * 1000;
 

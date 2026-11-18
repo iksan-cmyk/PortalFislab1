@@ -492,3 +492,30 @@ async function apiDeleteGrade(body) {
   if (error) throw new Error(error.message);
   return { success: true };
 }
+
+/* Pemantauan penilaian: cek akses. Hasil dicache per sesi (reset saat logout). */
+async function apiAksesPemantauan() {
+  if (typeof window._aksesPemantauan === 'boolean') return window._aksesPemantauan;
+  try {
+    const { data, error } = await SB.rpc('punya_akses_pemantauan');
+    if (error) throw error;
+    window._aksesPemantauan = !!data;
+  } catch (_) {
+    window._aksesPemantauan = false;
+  }
+  return window._aksesPemantauan;
+}
+
+/* Pemantauan penilaian: daftar unit yang sudah lewat (tanpa cache, harus segar). */
+async function apiPemantauanPenilaian() {
+  const { data, error } = await SB.rpc('pemantauan_penilaian');
+  if (error) throw error;
+  return data || [];
+}
+
+/* Pemantauan penilaian: ringkasan unit belum waktunya / belum dijadwalkan. */
+async function apiPemantauanRingkas() {
+  const { data, error } = await SB.rpc('pemantauan_ringkas');
+  if (error) throw error;
+  return (data && data[0]) || { total_unit: 0, belum_waktu: 0 };
+}

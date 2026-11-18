@@ -42,6 +42,7 @@ async function showApp(){
         api('getRotasi',{kode:ses.kode.join(',')}),
       ]);
       APP.modules=mods; APP.users=users; APP.rotasi=rotasi;
+      await apiAksesPemantauan().catch(()=>false);
     } else {
       const [mods,{users}] = await Promise.all([getMods(),api('getUsers',{},true)]);
       APP.modules=mods; APP.users=users;
@@ -57,6 +58,7 @@ const IC={
   jadwal:`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M8 3v4M16 3v4M3 10h18"/></svg>`,
   nilai:`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M4 19V9M12 19V5M20 19v-7"/></svg>`,
   kontak:`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M21 15a2 2 0 0 1-2 2H8l-5 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>`,
+  pemantauan:`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M9 3h6v3H9z"/><rect x="5" y="5" width="14" height="16" rx="2"/><path d="M9 13l2 2 4-4"/></svg>`,
   camera:`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M4 8h3l2-3h6l2 3h3a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V9a1 1 0 0 1 1-1z"/><circle cx="12" cy="13" r="4"/></svg>`,
 };
 
@@ -129,7 +131,7 @@ function buildNav(items, active) {
   if (botNav) {
     botNav.innerHTML = items.map(n => `
       <a href="#${n.path}" class="${active===n.path?'active':''}">
-        ${IC[n.icon]}<span>${n.label}</span>
+        ${IC[n.icon]}<span>${n.labelMob || n.label}</span>
       </a>`).join('');
   }
 }

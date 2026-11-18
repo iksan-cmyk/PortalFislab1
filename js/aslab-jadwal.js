@@ -2,8 +2,11 @@
 
 /*aslab*/
 const NAV_A=[{path:'/a/jadwal',label:'Jadwal',icon:'jadwal'},{path:'/a/katalog',label:'Katalog',icon:'jadwal'},{path:'/a/nilai',label:'Nilai',icon:'nilai'},{path:'/a/modul',label:'Modul',icon:'modul'},{path:'/a/profil',label:'Profil',icon:'profil'}];
-function renderAslab(hash,ses){const path=hash||'/a/jadwal';buildNav(NAV_A,path);
-  switch(path){case'/a/katalog':loadKatalogA(ses);break;case'/a/nilai':loadNilaiA(ses);break;case'/a/modul':loadModulA(ses);break;case'/a/profil':loadProfilA(ses);break;default:loadJadwalA(ses);}
+const NAV_PEMANTAUAN={path:'/a/pemantauan',label:'Pemantauan',labelMob:'Pantau',icon:'pemantauan'};
+// NAV_A tidak diubah; item Pemantauan hanya muncul bila pengguna punya akses.
+function navAslab(){ return window._aksesPemantauan===true ? NAV_A.concat([NAV_PEMANTAUAN]) : NAV_A; }
+function renderAslab(hash,ses){const path=hash||'/a/jadwal';buildNav(navAslab(),path);
+  switch(path){case'/a/pemantauan':loadPemantauan(ses);break;case'/a/katalog':loadKatalogA(ses);break;case'/a/nilai':loadNilaiA(ses);break;case'/a/modul':loadModulA(ses);break;case'/a/profil':loadProfilA(ses);break;default:loadJadwalA(ses);}
 }
 
 const SESI = ['07.00-08.40','09.00-10.40','11.00-12.40','13.30-15.10','15.30-17.10','18.30-20.20'];

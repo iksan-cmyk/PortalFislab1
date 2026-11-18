@@ -1,9 +1,10 @@
 'use strict';
 
 /*admin anjy*/
-const NAV_AD=[{path:'/ad/jadwal',label:'Jadwal',icon:'jadwal'},{path:'/ad/nilai',label:'Nilai',icon:'nilai'},{path:'/ad/pengguna',label:'Profil',icon:'profil'}];
+const NAV_AD=[{path:'/ad/jadwal',label:'Jadwal',icon:'jadwal'},{path:'/ad/nilai',label:'Nilai',icon:'nilai'},{path:'/ad/pengguna',label:'Profil',icon:'profil'},{path:'/ad/pemantauan',label:'Pemantauan',icon:'pemantauan'}];
 function renderAdmin(hash,ses){const path=hash||'/ad/jadwal';buildNav(NAV_AD,path);
-  if(path==='/ad/pengguna')loadAdminPengguna(ses);
+  if(path==='/ad/pemantauan')loadPemantauan(ses);
+  else if(path==='/ad/pengguna')loadAdminPengguna(ses);
   else if(path==='/ad/nilai')loadAdminNilai(ses);
   else loadAdminJadwal(ses);}
 async function loadAdminNilai(ses){
