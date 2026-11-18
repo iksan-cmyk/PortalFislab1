@@ -55,7 +55,7 @@ CREATE TABLE public.schedules (
 );
 
 -- grades: 10 komponen nilai + 10 catatan + nilai_akhir (dihitung trigger).
--- Bobot dipertahankan 105% persis seperti KOMP di script.js (bukan bug):
+-- Bobot dipertahankan 105% persis seperti KOMP di js/nilai-util.js (bukan bug):
 --   prelab 10, inlab 10, abstrak 10, pendahuluan 10, metodologi 5,
 --   analisis 20, pembahasan 25, kesimpulan 10, format 5, plagiasi 0.
 CREATE TABLE public.grades (
@@ -147,7 +147,7 @@ CREATE TRIGGER on_auth_user_created
   FOR EACH ROW EXECUTE FUNCTION public.handle_new_user();
 
 -- recompute_nilai_akhir: hitung ulang nilai_akhir di server.
--- Nilai client diabaikan. Bobot 105% dipertahankan persis seperti KOMP/script.js.
+-- Nilai client diabaikan. Bobot 105% dipertahankan persis seperti KOMP/js/nilai-util.js.
 CREATE OR REPLACE FUNCTION public.recompute_nilai_akhir() RETURNS trigger
 LANGUAGE plpgsql AS $$
 BEGIN

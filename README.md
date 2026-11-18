@@ -5,7 +5,7 @@ Portal manajemen praktikum fisika laboratorium untuk 3 role:
 - **aslab** (asisten lab) — atur jadwal & input nilai modul yang dipegang
 - **admin** — rekap nilai semua praktikan, kelola daftar pengguna
 
-Frontend statis (`index.html` + `script.js` + `style.css`) memanggil
+Frontend statis (`index.html` + `js/` + `style.css`) memanggil
 [Supabase](https://supabase.com) langsung lewat `@supabase/supabase-js`,
 diamankan sepenuhnya lewat Row Level Security (RLS) Postgres.
 
@@ -23,7 +23,8 @@ Tidak ada server Node/Express terpisah. Logika yang wajib server-side
 ## Struktur folder
 
 ```
-/                     — frontend statis (index.html, script.js, style.css)
+/                     — frontend statis (index.html, style.css)
+/js/                  — kode JS terpecah per modul (dimuat via <script> klasik berurutan)
 /supabase/migrations/ — SQL migration (schema + RLS policy + trigger)
 /supabase/functions/  — Edge Function (kalau ada logic server-side)
 /migration/           — CSV ekspor Google Sheets + skrip migrasi satu-kali
@@ -86,7 +87,7 @@ nilai yang dikirim client diabaikan.
 
 Setiap komponen punya pasangan kolom catatan `cat_<key>` (mis.
 `cat_inlab_pengambilan_data`); di frontend camelCase (mis.
-`catInlabPengambilanData`). Daftar otoritatif: array `KOMP` di `script.js`,
+`catInlabPengambilanData`). Daftar otoritatif: array `KOMP` di `js/nilai-util.js`,
 `KOMP_KEYS`/`CAT_MAP` di `migration/migrate.js`, trigger
 `recompute_nilai_akhir` di `0006_skema_nilai_v3.sql`. Ketiganya wajib sinkron.
 
@@ -99,7 +100,7 @@ FK di `rotasi`/`schedules`/`grades`) — `id` **tidak boleh** dipakai untuk
 `.order()` karena bertipe text sehingga urutan alfabetis (`1,10,2,...`).
 
 Frontend memanggil `.order('urutan')` di `apiGetModules()` (lihat
-`script.js`). Backfill awal mengambil angka dari `kode` (E1 → 1, E10 → 10);
+`js/api.js`). Backfill awal mengambil angka dari `kode` (E1 → 1, E10 → 10);
 migration: `supabase/migrations/0007_modules_urutan.sql`.
 
 ## Aturan jadwal
