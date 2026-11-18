@@ -1,29 +1,15 @@
--- 0009_batas_aslab_jadwal.sql
--- Batas maksimal 3 aslab per opsi jadwal (sesi) per tanggal + RPC katalog lintas-aslab.
+-- Batas maksimal 3 kelompok per (tanggal, sesi) + RPC katalog jadwal lintas-aslab.
 --
--- === RINGKASAN INVESTIGASI (Task 0) ===
--- Tabel pilihan jadwal aslab: TIDAK ada tabel terpisah jadwal_aslab/pilihan_jadwal.
--- Yang dipakai adalah tabel `schedules` (lihat 0001_initial_schema.sql:46-55):
---   module_id text, kelompok int, tanggal date, sesi text, set_by text, updated_at,
---   UNIQUE(module_id, kelompok).
--- Pemetaan kolom (placeholder -> nama asli):
---   <KOLOM_OPSI>     = sesi    (slot waktu text, mis. '07.30-08.50'; opsi yang dipilih aslab)
---   <KOLOM_TANGGAL>  = tanggal (date KALENDER NYATA -- bukan cuma hari-dalam-minggu.
---                       logic Jumat vs Senin-Kamis di getSesiOptions/script.js lama
---                       hanya UX sisi client untuk memilih DAFTAR opsi; di DB tersimpan
---                       sebagai sesi text + tanggal date aktual.)
---   <KOLOM_ASLAB_ID> = set_by  (username aslab yang set jadwal, dikirim form sebagai ses.username)
--- Konfirmasi Kimak: "3 aslab" = maksimal 3 TOTAL per (sesi, tanggal), aslab ke-4 ditolak.
+-- Pilihan jadwal aslab disimpan di tabel `schedules`: module_id, kelompok, tanggal (date),
+-- sesi (text slot waktu), set_by (username aslab), updated_at; UNIQUE(module_id, kelompok).
+-- Aturan: maksimal 3 TOTAL baris per (sesi, tanggal); baris ke-4 ditolak.
 --
--- RLS schedules saat ini (0001:199-224): aslab hanya ALL untuk modul yang dipegang sendiri
--- (cek via rotasi). Aslab TIDAK bisa SELECT jadwal milik aslab lain -> untuk hitung terisi
--- (Task C2) dan katalog (Task D) butuh akses baca lintas-aslab. Diselesaikan via RPC
--- SECURITY DEFINER di bawah (least-privilege: hanya kolom tanggal/sesi/set_by/aslab_name),
--- bukan SELECT policy yang membuka seluruh baris schedules.
+-- Dengan RLS saat ini (0001), aslab hanya ALL untuk modul yang dipegang sendiri dan tidak
+-- bisa membaca jadwal aslab lain. Untuk menghitung slot terisi dan menampilkan katalog
+-- diperlukan akses baca lintas-aslab, disediakan lewat RPC SECURITY DEFINER di bawah
+-- (least-privilege: hanya kolom tanggal/sesi/set_by/aslab_name, bukan SELECT seluruh baris).
 
--- =============================================================================
--- C1. TRIGGER: batas 3 aslab per (sesi, tanggal) — sumber kebenaran, anti race-condition
--- =============================================================================
+-- TRIGGER: batas 3 kelompok per (sesi, tanggal) — sumber kebenaran, anti race-condition
 
 CREATE OR REPLACE FUNCTION public.cek_batas_aslab_jadwal()
 RETURNS TRIGGER AS $$
@@ -50,7 +36,7 @@ BEGIN
 
   -- jumlah_terisi = jumlah aslab lain yang sudah ambil slot ini.
   -- >= 3 berarti slot sudah ditempati 3 aslab lain -> diri kita jadi ke-4 -> tolak.
-  -- (Max 3 TOTAL per (sesi, tanggal), sesuai konfirmasi Kimak.)
+  -- (Maksimal 3 TOTAL per (sesi, tanggal).)
   IF jumlah_terisi >= 3 THEN
     RAISE EXCEPTION 'Jadwal ini sudah penuh (maksimal 3 aslab per tanggal)'
       USING ERRCODE = 'P0001';
@@ -68,11 +54,9 @@ CREATE TRIGGER trg_batas_aslab_jadwal
   BEFORE INSERT OR UPDATE ON public.schedules
   FOR EACH ROW EXECUTE FUNCTION public.cek_batas_aslab_jadwal();
 
--- =============================================================================
--- C3. RPC SECURITY DEFINER: katalog jadwal lintas-aslab (read-only, least-privilege)
--- Dipakai untuk: Task C2 (hitung terisi per slot -> indikator) & Task D (katalog).
--- Hanya mengekspos tanggal/sesi/set_by/aslab_name — bukan module_id/kelompok/updated_at.
--- =============================================================================
+-- RPC SECURITY DEFINER: katalog jadwal lintas-aslab (read-only, least-privilege).
+-- Dipakai untuk indikator slot terisi dan halaman Katalog. Hanya mengekspos
+-- tanggal/sesi/set_by/aslab_name — bukan module_id/kelompok/updated_at.
 
 CREATE OR REPLACE FUNCTION public.katalog_jadwal_aslab()
 RETURNS TABLE (

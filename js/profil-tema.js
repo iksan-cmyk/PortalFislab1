@@ -103,14 +103,14 @@ function toggleTheme() {
   const current = document.documentElement.classList.contains('dark') ? 'dark' : 'light';
   applyTheme(current === 'dark' ? 'light' : 'dark');
 }
-/* === EASTER EGG: efek gravitasi (Fitur 3, RENCANA_PERUBAHAN_v8.md) ===
+/* EASTER EGG: efek gravitasi.
    Trigger: 7 klik pada tombol TOGGLE TEMA (sidebar #btn-theme-sb atau
    tombol tema mobile di #mob-actions). Counter di state JS biasa (reset
    saat reload, tidak persist). Efek: elemen sidebar abu-abu (non-aktif)
    DAN isi halaman yang sedang dibuka (#content) jatuh ke bawah viewport
    (animasi ringan percepatan + bounce kecil), tetap di posisi jatuh (tidak
    auto-reset). Navigasi asli tetap jalan (link `<a>` tidak di-disable).
-   Reset hanya via refresh manual. — */
+   Reset hanya via refresh manual. */
 const EGG_CLICKS_TARGET = 7;
 function initGravityEgg(){
   window._eggClicks = 0;

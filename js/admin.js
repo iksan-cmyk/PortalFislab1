@@ -81,10 +81,10 @@ async function adStuChange(sel){
   }catch(err){ if(mySeq === _adStuReqSeq && sel.value === reqUsername) wrap.innerHTML=`<p style="color:red">${esc(err.message)}</p>`; }
 }
 
-/* — openAdminNilaiForm: modal form input nilai (admin, full power untuk
+/* openAdminNilaiForm: modal form input nilai (admin, full power untuk
    kombinasi praktikan+modul apa pun). Reuse pola form aslab (aStuChange),
    nilaiAkhir dihitung trigger di server. Data diambil SEGAR saat tombol Edit
-   diklik (C3), bukan dari cache window._adGrades yang bisa basi. — */
+   diklik (C3), bukan dari cache window._adGrades yang bisa basi. */
 async function openAdminNilaiForm(username, judul){
   const setBy = (window._adSes && window._adSes.username) || 'admin';
   const u=(window._adUsers||[]).find(x=>x.username===username);
@@ -154,12 +154,11 @@ async function hapusAdminNilai(username, judul){
     const sel=document.getElementById('ad-stu-sel');if(sel&&sel.value)adStuChange(sel);
   }catch(err){toast('Gagal: '+err.message);}
 }
-/* — Halaman Jadwal admin (Fitur 1, RENCANA_PERUBAHAN_v8.md).
-   Admin bisa: lihat seluruh jadwal lintas kelompok/modul/tanggal + aslab
-   pemegang slot, filter (kelompok/modul/tanggal/aslab), edit (aslab pemegang
-   slot + tanggal/sesi), dan hapus (dengan cascade delete nilai terkait via
-   RPC admin_hapus_jadwal, plus modal konfirmasi eksplisit).
-   Trigger cek_batas_aslab_jadwal (0009) tetap berlaku saat edit. — */
+/* Halaman Jadwal admin. Admin bisa: lihat seluruh jadwal lintas kelompok/modul/tanggal
+   + aslab pemegang slot, filter (kelompok/modul/tanggal/aslab), edit (aslab pemegang
+   slot + tanggal/sesi), dan hapus (cascade hapus nilai terkait via RPC
+   admin_hapus_jadwal, plus modal konfirmasi eksplisit).
+   Trigger cek_batas_aslab_jadwal (0009) tetap berlaku saat edit. */
 async function loadAdminJadwal(ses){
   setContent(loading('Memuat jadwal…'));
   try{
@@ -244,9 +243,9 @@ function renderAdminJadwalTable(){
   window._adJadwalRows = rows;
 }
 
-/* — Edit jadwal (admin): ubah aslab pemegang slot + tanggal/sesi.
+/* Edit jadwal (admin): ubah aslab pemegang slot + tanggal/sesi.
    Reuse apiSetSchedule (upsert onConflict module_id,kelompok) — trigger
-   max-3 tetap berjalan; bila slot tujuan penuh, tangkap & tampilkan error. — */
+   max-3 tetap berjalan; bila slot tujuan penuh, tangkap & tampilkan error. */
 function openAdminJadwalEdit(idx, moduleId, kelompok){
   const rows = window._adJadwalRows || [];
   const r = rows[idx];
@@ -304,10 +303,10 @@ async function submitAdminJadwalEdit(e, moduleId, kelompok){
   }
 }
 
-/* — Hapus jadwal (admin) dengan modal konfirmasi EKSPLISIT. Cascade delete
+/* Hapus jadwal (admin) dengan modal konfirmasi EKSPLISIT. Cascade delete
    nilai terkait via RPC admin_hapus_jadwal (transaksi atomik).
    C4: tampilkan jumlah nilai + nama praktikan yang akan terhapus, tanpa
-   mengubah RPC admin_hapus_jadwal. — */
+   mengubah RPC admin_hapus_jadwal. */
 async function openAdminJadwalHapus(moduleId, kelompok, judul, kelompokDisp){
   // Hitung nilai yang akan terdampak (replikasi himpunan subquery admin_hapus_jadwal:
   // grades module ini untuk praktikan yang profiles.kelompok == kelompok).

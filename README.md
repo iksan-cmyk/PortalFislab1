@@ -26,11 +26,9 @@ Tidak ada server Node/Express terpisah. Logika yang wajib server-side
 /                     — frontend statis (index.html, style.css)
 /js/                  — kode JS terpecah per modul (dimuat via <script> klasik berurutan)
 /supabase/migrations/ — SQL migration (schema + RLS policy + trigger)
-/supabase/functions/  — Edge Function (kalau ada logic server-side)
 /migration/           — CSV ekspor Google Sheets + skrip migrasi satu-kali
 vercel.json           — header keamanan & routing
 .env.example          — variabel lingkungan (TANPA nilai asli)
-AGENTS.md             — konteks permanen untuk agent (baca sebelum ubah apa pun)
 ```
 
 ## Setup
@@ -113,9 +111,6 @@ khusus E3/E9 (maks 2 E3 / maks 1 E9 per sesi — dihapus di `0017`): aslab
 bebas memilih tanggal & sesi untuk judul apa pun.
 
 ## Keamanan
-
-Ringkasan singkat — detail lengkap dan justifikasi ada di
-[`AGENTS.md`](AGENTS.md) (baca dulu sebelum mengubah apa pun).
 
 - RLS aktif di semua tabel; otorisasi lewat `auth.uid()` + `app_current_role()`,
   bukan sekadar cek role di frontend.

@@ -1,5 +1,4 @@
--- 0013_fk_username_on_update_cascade.sql
--- Fitur 2 (RENCANA_PERUBAHAN_v8.md): dukung rename username praktikan.
+-- Dukung rename username praktikan.
 --
 -- profiles.username direferensikan oleh:
 --   - grades.username      (REFERENCES profiles(username), 0001)
@@ -8,7 +7,7 @@
 -- akan GAGAL bila ada baris grades/rotasi yang mereferensi username lama.
 --
 -- Script rename_username.js hanya mengupdate profiles.username (+ email Auth);
--- agar tidak harus menyentuh grades/rotasi manual (di luar scope spec), ubah
+-- agar tidak harus menyentuh grades/rotasi manual, ubah
 -- kedua FK menjadi ON UPDATE CASCADE. Efek samping positif: rename username
 -- aslab juga otomatis propagasi ke rotasi.aslab_username. Tidak ada perubahan
 -- perilaku DELETE (tetap NO ACTION default) -> tidak menghapus nilai/jadwal

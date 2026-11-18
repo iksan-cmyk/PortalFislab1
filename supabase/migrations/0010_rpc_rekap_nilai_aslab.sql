@@ -1,5 +1,4 @@
--- 0010_rpc_rekap_nilai_aslab.sql
--- RPC read-only lintas-aslab untuk Rekap Nilai E1-E10 (Fitur 1, RENCANA_PERUBAHAN_v5.md Task A).
+-- RPC read-only lintas-aslab untuk Rekap Nilai E1-E10.
 -- Least-privilege: HANYA expose username + module_id + nilai_akhir.
 -- TIDAK expose 12 komponen nilai, catatan, set_by, atau updated_at.
 -- Tidak mengubah RLS/GRANT tulis apa pun di tabel grades — murni tambahan baca.

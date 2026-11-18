@@ -1817,7 +1817,7 @@ html.dark .modal {
   }
 }
 
-/* === EASTER EGG: efek gravitasi (Fitur 3, RENCANA_PERUBAHAN_v8.md) ===
+/* EASTER EGG: efek gravitasi.
    Dipicu setelah 7 klik pada tombol toggle Tema. Elemen sidebar abu-abu
    DAN isi halaman (#content) jatuh ke bawah viewport, tetap di posisi
    jatuh (tidak auto-reset). Navigasi asli tetap berfungsi (pointer-events

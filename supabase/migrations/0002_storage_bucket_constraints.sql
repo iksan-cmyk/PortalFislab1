@@ -1,6 +1,5 @@
 -- Batasan upload foto profil di level Storage (server-side, bukan cuma client).
--- Memenuhi item #6 checklist: restrict file uploads — validasi tipe & ukuran
--- di server juga, jangan cuma di client.
+-- Tetapkan validasi tipe & ukuran di server juga, jangan cuma di client.
 --
 -- Kolom pada storage.buckets:
 --   allowed_mime_types  text[]   -- daftar MIME yang diizinkan, NULL = semua

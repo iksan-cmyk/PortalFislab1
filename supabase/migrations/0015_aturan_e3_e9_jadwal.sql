@@ -1,7 +1,6 @@
--- 0015_aturan_e3_e9_jadwal.sql
 -- Aturan jadwal E3 & E9 per sesi (tanggal + slot sesi).
 --
--- Aturan (RENCANA_PERUBAHAN_v9.md Tugas 3):
+-- Aturan:
 --   E3  : maksimal 2 kelompok E3 per sesi; TIDAK boleh ada judul lain di sesi
 --         yang sama (E3 hanya boleh bersama E3).
 --   E9  : maksimal 1 kelompok E9 per sesi; judul lain BOLEH ikut di sesi yang
@@ -132,16 +131,6 @@ CREATE TRIGGER trg_aturan_e3_e9_jadwal
   BEFORE INSERT OR UPDATE ON public.schedules
   FOR EACH ROW EXECUTE FUNCTION public.cek_aturan_e3_e9_jadwal();
 
--- =============================================================================
--- VERIFIKASI (manual, setelah apply):
---   Sebagai aslab non-admin:
---   1. Sesi kosong: insert E3 kelompok A, E3 kelompok B -> OK. E3 kelompok C
---      -> ditolak ("2 kelompok E3").
---   2. Sesi berisi E3: insert judul non-E3 -> ditolak ("Sesi ini berisi E3").
---      Sesi berisi non-E3: insert E3 -> ditolak ("E3 tidak boleh berada di
---      sesi yang sama dengan judul lain").
---   3. Sesi berisi 1 kelompok E9: insert E9 kelompok kedua -> ditolak ("1
---      kelompok E9"); insert judul non-E3 lain -> OK.
---   4. Aturan 3-aslab per slot (0009) tetap berfungsi.
---   Sebagai admin: semua pelanggaran di atas LOLOS.
--- =============================================================================
+-- Verifikasi manual (aslab non-admin): sesi berisi E3 menolak judul non-E3 & E3
+-- ketiga; sesi berisi judul non-E3 menolak E3; sesi berisi 1 E9 menolak E9 kedua.
+-- Admin lolos semua pelanggaran.

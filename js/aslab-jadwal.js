@@ -26,7 +26,7 @@ function terisiCount(tanggal, sesi, own){
 // sesiOptionsHtml: opsi sesi + indikator terisi (x/3) atau disabled "Penuh" jika sudah 3.
 // Opsi yang sama dengan currentSesi TIDAK boleh disabled (bug lama: opsi terpilih yang
 // disabled tidak ikut terkirim form -> sesi null saat aslab simpan ulang slot sendiri di
-// slot yang sudah penuh). (Tugas 3.3)
+// slot yang sudah penuh.
 function sesiOptionsHtml(tanggal, currentSesi, own){
   return getSesiOptions(tanggal).map(x=>{
     const c = terisiCount(tanggal, x, own);
@@ -115,13 +115,13 @@ async function loadJadwalA(ses){
     }).join('')}`);
   }catch(e){setContent(`<p style="color:red">${esc(e.message)}</p>`);}
 }
-/* — cekBatasSesiClient: pra-pengecekan batas umum 3 kelompok per sesi di sisi
+/* cekBatasSesiClient: pra-pengecekan batas umum 3 kelompok per sesi di sisi
    klien memakai data jadwal lintas-aslab (window._jadwalSesi dari RPC
    getJadwalKelompokModul). Return pesan error (string) bila melanggar, atau
    null bila OK. Mengecualikan baris sendiri (module_id + kelompok yang sama)
    karena upsert menggantikan baris itu. Trigger DB (cek_batas_aslab_jadwal,
    0009/0016) tetap cadangan untuk race condition.
-   Aturan: maksimal 3 kelompok per sesi — satu-satunya aturan jadwal. — */
+   Aturan: maksimal 3 kelompok per sesi — satu-satunya aturan jadwal. */
 function cekBatasSesiClient(tanggal, sesi, judul, kelompokId){
   if(!tanggal || !sesi) return null;
   if(!Array.isArray(window._jadwalSesi)) return null; // data tidak tersedia -> biarkan DB
@@ -173,12 +173,11 @@ async function hapusJadwal(kelompokId,judul,setBy,updatedAt){
   }
 }
 
-/* — Katalog Jadwal Praktikum (Task 2): tampil seluruh pilihan jadwal SEMUA aslab,
-   read-only, group per tanggal (paling jauh di masa depan di atas). Akses baca lintas-aslab
-   via RPC katalog_jadwal_aslab yang sama dengan indikator Task 1b (jangan buat mekanisme terpisah).
-   Task B (RENCANA_PERUBAHAN_v5.md): tambah toggle "Per Tanggal" / "Per Kelompok".
-   Per Tanggal = logika lama, TIDAK diubah. Per Kelompok = 1 card per kelompok,
-   10 baris urut modul E1→E10. — */
+/* Katalog Jadwal Praktikum: tampil seluruh pilihan jadwal SEMUA aslab, read-only,
+   group per tanggal (paling jauh di masa depan di atas). Akses baca lintas-aslab via
+   RPC katalog_jadwal_aslab (sama dengan indikator terisi di halaman Jadwal).
+   Ada toggle "Per Tanggal" / "Per Kelompok". Per Tanggal = logika lama.
+   Per Kelompok = 1 card per kelompok, 10 baris urut modul E1→E10. */
 async function loadKatalogA(ses){
   setContent(loading());
   try{
@@ -232,8 +231,8 @@ function renderKatalogContent(){
   }
 }
 
-/* — Per Tanggal: SAMA PERSIS seperti kode loadKatalogA lama — hanya dipindah
-   ke fungsi terpisah, logika/output tidak diubah. — */
+/* Per Tanggal: SAMA PERSIS seperti kode loadKatalogA lama — hanya dipindah
+   ke fungsi terpisah, logika/output tidak diubah. */
 function renderKatalogTanggal(){
   const { katalog } = window._katalogData || {};
   // group by tanggal (urut DESC dari RPC), lalu by sesi (urut ASC dari RPC).
@@ -278,10 +277,10 @@ function renderKatalogTanggal(){
   }).join('');
 }
 
-/* — Per Kelompok (baru): 1 card per kelompok (urut ascending), isi = tabel 10
+/* Per Kelompok (baru): 1 card per kelompok (urut ascending), isi = tabel 10
    baris urut modul E1→E10 (urutan dari array mods). Kolom: Modul (kode+judul) |
    Aslab pemegang (dari rotasi) | Tanggal & Sesi (dari RPC jadwal_kelompok_modul,
-   atau "Belum dijadwalkan"). — */
+   atau "Belum dijadwalkan"). */
 function renderKatalogKelompok(){
   const { jadwal, rotasi, mods } = window._katalogData || {};
   const m = mods || [];

@@ -42,12 +42,12 @@ function updateTotal(form) {
   el.textContent = total.toFixed(2);
 }
 // nilaiVal: tampilan nilai di input form. '' hanya bila undefined/null/'';
-// nilai 0 yang sah tetap tampil '0' (Tugas 5).
+// nilai 0 yang sah tetap tampil '0'.
 function nilaiVal(v) {
   return (v === undefined || v === null || v === '') ? '' : v;
 }
 // totalDisplay: tampilan pratinjau total. '—' hanya bila SEMUA komponen (kecuali
-// keterlambatan) kosong. Nilai total 0 tetap tampil '0.00'. (Tugas 1.5)
+// keterlambatan) kosong. Nilai total 0 tetap tampil '0.00'.
 function totalDisplay(g) {
   const adaNilai = KOMP.some(k => k.key !== 'keterlambatan'
     && g[k.key] !== undefined && g[k.key] !== null && g[k.key] !== '');

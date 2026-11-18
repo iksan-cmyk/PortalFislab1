@@ -1,5 +1,4 @@
--- 0016_perbaikan_aturan_jadwal.sql
--- Perbaikan aturan jadwal sesuai RENCANA_PERUBAHAN_v10.md Tugas 2.
+-- Perbaikan aturan jadwal.
 --
 -- Aturan final (hanya TIGA), ditegakkan pada baris schedules LAIN dengan
 -- kombinasi tanggal + sesi yang sama (baris sendiri dikecualikan):
@@ -32,11 +31,8 @@
 -- ditegakkan saat INSERT/UPDATE berikutnya. Jangan dijalankan dari sini
 -- (jalankan via Supabase SQL Editor / db push).
 
--- =============================================================================
--- 1. CREATE OR REPLACE FUNCTION cek_batas_aslab_jadwal() — batas umum 3 baris
---    Salin badan 0009, ubah HANYA: hitung baris (COUNT(*), exclude id sendiri)
+-- 1. Perbarui cek_batas_aslab_jadwal(): hitung baris (COUNT(*), exclude id sendiri)
 --    bukan DISTINCT set_by. Nama fungsi & trigger tetap.
--- =============================================================================
 CREATE OR REPLACE FUNCTION public.cek_batas_aslab_jadwal()
 RETURNS TRIGGER AS $$
 DECLARE
@@ -70,11 +66,8 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
--- =============================================================================
--- 2. CREATE OR REPLACE FUNCTION cek_aturan_e3_e9_jadwal() — E3 max 2, E9 max 1
---    Salin badan 0015, HAPUS pemeriksaan "E3 vs judul lain" dan "judul lain
---    vs E3". Pengecualian admin dipertahankan apa adanya.
--- =============================================================================
+-- 2. Perbarui cek_aturan_e3_e9_jadwal(): E3 max 2, E9 max 1.
+--    Basis 0015, hapus pemeriksaan "E3 vs judul lain". Pengecualian admin dipertahankan.
 CREATE OR REPLACE FUNCTION public.cek_aturan_e3_e9_jadwal()
 RETURNS TRIGGER AS $$
 DECLARE
@@ -153,15 +146,6 @@ $$ LANGUAGE plpgsql;
 -- menggantikan definisi lama, trigger existing (trg_batas_aslab_jadwal &
 -- trg_aturan_e3_e9_jadwal) langsung memakai fungsi baru.
 
--- =============================================================================
--- VERIFIKASI (manual, setelah apply):
---   Sebagai aslab non-admin:
---   1. Sesi kosong: insert E3 kelompok A, E3 kelompok B -> OK. E3 kelompok C
---      -> ditolak ("2 kelompok E3").
---   2. Sesi berisi 2 E3: insert judul E1 -> OK (jadi baris ke-3). Insert
---      baris ke-4 (judul apa pun) -> ditolak ("maksimal 3 kelompok per sesi").
---   3. Sesi berisi 1 E9: insert E9 kedua -> ditolak ("1 kelompok E9"); insert
---      judul non-E9 lain -> OK.
---   4. Tidak ada lagi penolakan "E3 tidak boleh berada" / "Sesi ini berisi E3".
---   Sebagai admin: E3/E9 LOLOS, batas umum 3 TETAP berlaku.
--- =============================================================================
+-- Verifikasi manual (aslab non-admin): sesi kosong menerima 3 baris judul apa pun;
+-- baris ke-4 ditolak ("maksimal 3 kelompok per sesi"). Batas umum 3 tetap berlaku
+-- untuk admin.

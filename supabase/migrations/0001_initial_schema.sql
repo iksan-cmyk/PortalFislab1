@@ -2,13 +2,11 @@
 -- Tabel, view, trigger, RLS policy, dan bucket Storage.
 -- Password TIDAK disimpan di tabel kita (urusan Supabase Auth / auth.users).
 
--- =============================================================================
 -- TABEL
--- =============================================================================
 
 -- profiles: metadata pengguna, 1:1 dengan auth.users.
 -- Catatan: kolom `judul` (label modul aslab) sengaja tidak ada — diturunkan
--- dari v_aslab_meta, tidak disimpan statis (penyesuaian #1).
+-- dari v_aslab_meta, tidak disimpan statis.
 CREATE TABLE public.profiles (
   id                   uuid PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
   username             text UNIQUE NOT NULL,
@@ -93,9 +91,7 @@ CREATE INDEX idx_grades_module_id ON public.grades(module_id);
 CREATE INDEX idx_schedules_module ON public.schedules(module_id);
 CREATE INDEX idx_rotasi_aslab     ON public.rotasi(aslab_username);
 
--- =============================================================================
 -- VIEW & FUNGSI HELPER
--- =============================================================================
 
 -- v_aslab_meta: kode & kelompok aslab diturunkan dari rotasi (bukan statis).
 CREATE OR REPLACE VIEW public.v_aslab_meta AS
@@ -124,9 +120,7 @@ LANGUAGE sql SECURITY DEFINER AS $$
   SELECT count(*)::integer FROM public.profiles WHERE role = 'aslab';
 $$;
 
--- =============================================================================
 -- TRIGGER
--- =============================================================================
 
 -- handle_new_user: auto-buat baris profiles saat user sign up di auth.users.
 -- Email sintetis {username}@portalfislab.local -> username = local-part.
@@ -170,9 +164,7 @@ CREATE TRIGGER trg_grades_nilai
   BEFORE INSERT OR UPDATE ON public.grades
   FOR EACH ROW EXECUTE FUNCTION public.recompute_nilai_akhir();
 
--- =============================================================================
 -- ROW LEVEL SECURITY
--- =============================================================================
 
 ALTER TABLE public.profiles  ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.modules   ENABLE ROW LEVEL SECURITY;
@@ -180,21 +172,15 @@ ALTER TABLE public.rotasi    ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.schedules ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.grades    ENABLE ROW LEVEL SECURITY;
 
--- -----------------------------------------------------------------------------
 -- modules: public read (landing page butuh daftar modul tanpa login).
--- -----------------------------------------------------------------------------
 CREATE POLICY modules_read ON public.modules
   FOR SELECT USING (true);
 
--- -----------------------------------------------------------------------------
 -- rotasi: authenticated read (praktikan & aslab butuh untuk jadwal/penilaian).
--- -----------------------------------------------------------------------------
 CREATE POLICY rotasi_read ON public.rotasi
   FOR SELECT TO authenticated USING (true);
 
--- -----------------------------------------------------------------------------
 -- schedules
--- -----------------------------------------------------------------------------
 -- praktikan: SELECT jadwal untuk kelompok sendiri.
 CREATE POLICY sched_p_select ON public.schedules
   FOR SELECT TO authenticated
@@ -223,9 +209,7 @@ CREATE POLICY sched_admin_all ON public.schedules
   USING (app_current_role() = 'admin')
   WITH CHECK (app_current_role() = 'admin');
 
--- -----------------------------------------------------------------------------
 -- grades
--- -----------------------------------------------------------------------------
 -- praktikan: SELECT baris milik sendiri saja.
 CREATE POLICY grades_p_select ON public.grades
   FOR SELECT TO authenticated
@@ -253,9 +237,7 @@ CREATE POLICY grades_admin_select ON public.grades
   FOR SELECT TO authenticated
   USING (app_current_role() = 'admin');
 
--- -----------------------------------------------------------------------------
 -- profiles
--- -----------------------------------------------------------------------------
 -- semua role: SELECT baris sendiri.
 CREATE POLICY prof_self_select ON public.profiles
   FOR SELECT TO authenticated
@@ -266,7 +248,7 @@ CREATE POLICY prof_p_select_aslab ON public.profiles
   FOR SELECT TO authenticated
   USING (app_current_role() = 'praktikan' AND role = 'aslab');
 
--- aslab: SELECT semua praktikan (penyesuaian #3 — tetap broad, bare minimum).
+-- aslab: SELECT semua praktikan (tetap broad, bare minimum).
 CREATE POLICY prof_a_select_p ON public.profiles
   FOR SELECT TO authenticated
   USING (app_current_role() = 'aslab' AND role = 'praktikan');
@@ -282,15 +264,13 @@ CREATE POLICY prof_self_update ON public.profiles
   USING (id = auth.uid())
   WITH CHECK (id = auth.uid());
 
--- admin: UPDATE semua profiles (penyesuaian #2 — kelola daftar pengguna).
+-- admin: UPDATE semua profiles (kelola daftar pengguna).
 CREATE POLICY prof_admin_update ON public.profiles
   FOR UPDATE TO authenticated
   USING (app_current_role() = 'admin')
   WITH CHECK (app_current_role() = 'admin');
 
--- =============================================================================
 -- STORAGE — bucket avatars
--- =============================================================================
 INSERT INTO storage.buckets (id, name, public)
 VALUES ('avatars', 'avatars', true)
 ON CONFLICT (id) DO NOTHING;
@@ -313,13 +293,11 @@ CREATE POLICY avatars_update ON storage.objects
   WITH CHECK (bucket_id = 'avatars'
               AND (storage.foldername(name))[1] = auth.uid()::text);
 
--- =============================================================================
 -- GRANT EKSPLISIT
 -- RLS policy hanya memfilter baris; tanpa GRANT pada tabel, role tidak bisa
 -- menyentuh tabel sama sekali. Grant di bawah adalah union hak akses dari semua
 -- policy per tabel. Insert/Delete pada profiles tidak diberikan ke client
 -- (pembuatan akun lewat Edge Function + service_role yang bypass RLS).
--- =============================================================================
 
 -- Skema public harus bisa dipakai oleh kedua role client.
 GRANT USAGE ON SCHEMA public TO anon, authenticated;

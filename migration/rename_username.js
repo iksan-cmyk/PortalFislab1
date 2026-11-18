@@ -1,4 +1,4 @@
-// rename_username.js — One-time script (Fitur 2, RENCANA_PERUBAHAN_v8.md).
+// rename_username.js — One-time script.
 // Prompt interaktif untuk mengganti username (sekaligus email sintetis Auth)
 // seorang praktikan berdasarkan NRP.
 //

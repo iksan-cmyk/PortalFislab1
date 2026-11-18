@@ -1,5 +1,4 @@
--- 0019_audit_log.sql
--- Audit log untuk schedules & grades (RENCANA_PERUBAHAN_v12.md Fase A).
+-- Audit log untuk schedules & grades.
 --
 -- Tujuan: setiap perubahan (UPDATE) dan penghapusan (DELETE) pada
 -- public.schedules dan public.grades tercatat, sehingga kasus "jadwal
@@ -43,9 +42,7 @@
 --      tersimpan di profiles.role). NULL ketika tidak ada sesi / dipanggil lewat
 --      service_role atau SQL Editor.
 --
--- =============================================================================
 -- 1. TABEL public.audit_log
--- =============================================================================
 CREATE TABLE IF NOT EXISTS public.audit_log (
   id             bigserial PRIMARY KEY,
   tabel          text NOT NULL CHECK (tabel IN ('schedules','grades')),
@@ -62,9 +59,7 @@ CREATE TABLE IF NOT EXISTS public.audit_log (
 CREATE INDEX IF NOT EXISTS idx_audit_log_dibuat_pada ON public.audit_log(dibuat_pada);
 CREATE INDEX IF NOT EXISTS idx_audit_log_tabel_aksi   ON public.audit_log(tabel, aksi);
 
--- =============================================================================
 -- 2. FUNGSI TRIGGER public.catat_audit()
--- =============================================================================
 CREATE OR REPLACE FUNCTION public.catat_audit()
 RETURNS trigger
 LANGUAGE plpgsql
@@ -91,7 +86,7 @@ BEGIN
     v_row_lama := to_jsonb(OLD);
     v_row_baru := NULL;
   ELSE
-    RETURN NEW; -- INSERT tidak dicatat (spec: hanya UPDATE & DELETE)
+    RETURN NEW; -- INSERT tidak dicatat
   END IF;
 
   INSERT INTO public.audit_log (tabel, aksi, row_lama, row_baru, actor_uid, actor_username, actor_role)
@@ -101,9 +96,7 @@ BEGIN
 END;
 $$;
 
--- =============================================================================
 -- 3. TRIGGER AFTER UPDATE OR DELETE pada schedules & grades
--- =============================================================================
 DROP TRIGGER IF EXISTS trg_audit_schedules ON public.schedules;
 CREATE TRIGGER trg_audit_schedules
   AFTER UPDATE OR DELETE ON public.schedules
@@ -114,10 +107,7 @@ CREATE TRIGGER trg_audit_grades
   AFTER UPDATE OR DELETE ON public.grades
   FOR EACH ROW EXECUTE FUNCTION public.catat_audit();
 
--- =============================================================================
--- 4. RLS + GRANT
---    backup SELECT ke authenticated, RLS yang membatasi = hanya admin.
--- =============================================================================
+-- 4. RLS + GRANT: SELECT ke authenticated, RLS yang membatasi = hanya admin.
 ALTER TABLE public.audit_log ENABLE ROW LEVEL SECURITY;
 
 DROP POLICY IF EXISTS audit_admin_select ON public.audit_log;
@@ -136,24 +126,6 @@ GRANT SELECT ON public.audit_log TO authenticated;
 -- tidak bisa intervensi serial.
 REVOKE ALL ON SEQUENCE public.audit_log_id_seq FROM anon, authenticated;
 
--- =============================================================================
--- VERIFIKASI (manual, setelah apply — jalankan sebagai dua sesi BERBEDA):
---   A. Siapkan 1 baris jadwal & 1 baris nilai (aslab/admin), catat id-nya.
---   B. UPDATE tanggal sesi baris jadwal itu, lalu UPDATE satu komponen nilai.
---   C. SELECT * FROM public.audit_log ORDER BY id DESC;
---      Harusnya muncul 2 baris baru (aksi='UPDATE', row_lama+row_baru terisi,
---      actor_uid/actor_username = user yang mengubah).
---   D. UPDATE jadwal itu dengan nilai yang SAMA persis (tanpa mengubah isi):
---      SELECT harusnya TIDAK menambah baris audit baru (diff hanya updated_at
---      diabaikan).
---   E. DELETE baris jadwal dan baris nilai itu (via UI aslab/hapus admin atau
---      RPC admin_hapus_jadwal):
---      SELECT * FROM public.audit_log ORDER BY id DESC;
---      -> 2 baris baru aksi='DELETE', row_baru NULL.
---   F. SELECT hanya bisa dilakukan oleh role 'admin';
---      role 'aslab'/'praktikan'/anon TIDAK boleh melihat isinya.
---   G. (Opsional) jalankan `node migrate.js` / SQL UPDATE lewat service_role
---      atau SQL Editor tanpa login:
---      audit_log bertambah baris dengan actor_uid NULL + actor_username NULL,
---      actor_role NULL, db_user = session_user (lihat catatan desain no.5).
--- =============================================================================
+-- Verifikasi manual (dua sesi berbeda): UPDATE & DELETE jadwal/nilai menambah satu
+-- baris audit (aksi=UPDATE/DELETE, actor terisi); re-save tanpa perubahan isi TIDAK
+-- menambah baris; hanya role admin yang bisa SELECT isinya.

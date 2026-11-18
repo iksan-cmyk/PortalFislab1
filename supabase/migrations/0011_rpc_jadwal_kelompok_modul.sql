@@ -1,13 +1,9 @@
--- 0011_rpc_jadwal_kelompok_modul.sql
--- RPC read-only lintas-aslab untuk tampilan "Per Kelompok" di Katalog Jadwal
--- (Fitur 2, RENCANA_PERUBAHAN_v5.md Task B).
--- Beda dengan katalog_jadwal_aslab (0009): RPC ini SENGAJA menambah expose
--- module_id + kelompok (yang sebelumnya sengaja disembunyikan) karena
--- toggle "Per Kelompok" butuh join jadwal ke modul+kelompok, bukan cuma slot
--- waktu. Keputusan expose tambahan ini sudah dikonfirmasi project owner —
--- lihat RENCANA_PERUBAHAN_v5.md Task B0 sebelum mengubah lebih lanjut.
--- Tidak menyentuh RPC katalog_jadwal_aslab yang sudah ada (biar toggle
--- "Per Tanggal" & indikator terisi Task 1b tidak ikut berubah).
+-- RPC read-only lintas-aslab untuk tampilan "Per Kelompok" di Katalog Jadwal.
+-- Beda dengan katalog_jadwal_aslab (0009): RPC ini menambah expose module_id +
+-- kelompok (sengaja disembunyikan di 0009) karena toggle "Per Kelompok" butuh
+-- join jadwal ke modul+kelompok, bukan cuma slot waktu. Tidak menyentuh RPC
+-- katalog_jadwal_aslab yang sudah ada supaya toggle "Per Tanggal" & indikator
+-- slot terisi di halaman Jadwal tidak berubah.
 
 CREATE OR REPLACE FUNCTION public.jadwal_kelompok_modul()
 RETURNS TABLE (

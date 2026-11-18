@@ -30,7 +30,7 @@ async function api(action, body={}, useCache=false) {
   return data;
 }
 
-/* — Supabase auth: login berbasis username, email sintetis {username}@student.its.ac.id — */
+/* Supabase auth: login berbasis username, email sintetis {username}@student.its.ac.id */
 async function apiLogin(body) {
   const username = (body.username || '').trim().toLowerCase();
   if (!username) throw new Error('Username wajib diisi.');
@@ -62,7 +62,7 @@ async function apiLogin(body) {
   return { user };
 }
 
-/* — Supabase auth: ganti password + upload foto ke Storage — */
+/* Supabase auth: ganti password + upload foto ke Storage */
 async function apiUpdateProfile(body) {
   const ses = getSession();
   if (!ses) throw new Error('Sesi tidak ditemukan.');
@@ -107,7 +107,7 @@ async function apiUpdateProfile(body) {
   return { user: { ...ses, photo: newPhoto, must_change_password: false } };
 }
 
-/* — helper: konversi data URL (base64) ke Blob untuk upload Storage — */
+/* helper: konversi data URL (base64) ke Blob untuk upload Storage */
 function dataURLtoBlob(dataURL) {
   const [meta, b64] = dataURL.split(',');
   const mime = (meta.match(/:(.*?);/) || ['', 'image/png'])[1];
@@ -117,7 +117,7 @@ function dataURLtoBlob(dataURL) {
   return new Blob([arr], { type: mime });
 }
 
-/* — helper: cache map judul -> module id (dipakai getGrades/getSchedules/setSchedule/setGrade) — */
+/* helper: cache map judul -> module id (dipakai getGrades/getSchedules/setSchedule/setGrade) */
 let _judulToId = null;
 async function getModuleIdByJudul(judul) {
   if (!_judulToId) {
@@ -131,7 +131,7 @@ async function getModuleIdByJudul(judul) {
   return id;
 }
 
-/* — getModules: SELECT dari modules, public (anon bisa baca) — */
+/* getModules: SELECT dari modules, public (anon bisa baca) */
 async function apiGetModules() {
   const { data, error } = await SB.from('modules')
     .select('id,kode,judul,ringkas,file_url,file_type')
@@ -147,7 +147,7 @@ async function apiGetModules() {
   }))};
 }
 
-/* — getUsers: response disesuaikan per role (RLS sudah filter baris) — */
+/* getUsers: response disesuaikan per role (RLS sudah filter baris) */
 async function apiGetUsers() {
   const ses = getSession();
   if (!ses) {
@@ -201,7 +201,7 @@ async function apiGetUsers() {
   return { users };
 }
 
-/* — getGrades: body {username?} dan/atau {judul?} (judul = full module title) — */
+/* getGrades: body {username?} dan/atau {judul?} (judul = full module title) */
 async function apiGetGrades(body) {
   let query = SB.from('grades').select(`
     username, module_id, set_by, updated_at, nilai_akhir,
@@ -239,7 +239,7 @@ async function apiGetGrades(body) {
   }))};
 }
 
-/* — getSchedules: body {kelompok?} dan/atau {judul?} (judul = full module title) — */
+/* getSchedules: body {kelompok?} dan/atau {judul?} (judul = full module title) */
 async function apiGetSchedules(body) {
   let query = SB.from('schedules')
     .select('module_id, kelompok, tanggal, sesi, set_by, updated_at, modules:module_id(judul)');
@@ -260,7 +260,7 @@ async function apiGetSchedules(body) {
   }))};
 }
 
-/* — getRotasi: body {kelompok?} atau {kode:'E1,E2'} — */
+/* getRotasi: body {kelompok?} atau {kode:'E1,E2'} */
 async function apiGetRotasi(body) {
   let query = SB.from('rotasi')
     .select('kelompok, minggu, aslab_username, modules:module_id(id, kode, judul)')
@@ -295,7 +295,7 @@ async function apiGetRotasi(body) {
   }))};
 }
 
-/* — setSchedule: body {kelompokId, judul, tanggal, sesi, setBy}. tanggal kosong = delete. — */
+/* setSchedule: body {kelompokId, judul, tanggal, sesi, setBy}. tanggal kosong = delete. */
 async function apiSetSchedule(body) {
   const moduleId = await getModuleIdByJudul(body.judul);
   const kelompok = parseInt(body.kelompokId);
@@ -340,10 +340,10 @@ async function apiSetSchedule(body) {
   return { success: true };
 }
 
-/* — getKatalogJadwal: ambil seluruh pilihan jadwal semua aslab (lintas-aslab) via RPC
-   SECURITY DEFINER katalog_jadwal_aslab (lihat 0009_batas_aslab_jadwal.sql).
-   Dipakai untuk indikator terisi (Task 1b) & katalog read-only (Task 2).
-   Mengembalikan { katalog: [{tanggal, sesi, set_by, aslab_name}] } urut tanggal DESC. — */
+/* getKatalogJadwal: pilihan jadwal semua aslab (lintas-aslab) via RPC
+   SECURITY DEFINER katalog_jadwal_aslab (lihat 0009_batas_aslab_jadwal.sql),
+   untuk indikator terisi & katalog read-only. Mengembalikan
+   { katalog: [{tanggal, sesi, set_by, aslab_name}] } urut tanggal DESC. */
 async function apiGetKatalogJadwal() {
   const { data, error } = await SB.rpc('katalog_jadwal_aslab');
   if (error) throw new Error(error.message);
@@ -355,9 +355,9 @@ async function apiGetKatalogJadwal() {
   }))};
 }
 
-/* — getRekapNilai: ambil nilai_akhir SEMUA praktikan x SEMUA modul (lintas-aslab)
-   via RPC SECURITY DEFINER rekap_nilai_aslab (lihat 0010_rpc_rekap_nilai_aslab.sql).
-   Dipakai untuk tabel Rekap Nilai E1-E10 (Task A, RENCANA_PERUBAHAN_v5.md). — */
+/* getRekapNilai: nilai_akhir SEMUA praktikan x SEMUA modul (lintas-aslab) via
+   RPC SECURITY DEFINER rekap_nilai_aslab (lihat 0010_rpc_rekap_nilai_aslab.sql),
+   untuk tabel Rekap Nilai E1-E10. */
 async function apiGetRekapNilai() {
   const { data, error } = await SB.rpc('rekap_nilai_aslab');
   if (error) throw new Error(error.message);
@@ -368,10 +368,10 @@ async function apiGetRekapNilai() {
   }))};
 }
 
-/* — getJadwalKelompokModul: jadwal semua kelompok x semua modul (lintas-aslab)
+/* getJadwalKelompokModul: jadwal semua kelompok x semua modul (lintas-aslab)
    via RPC SECURITY DEFINER jadwal_kelompok_modul (lihat
    0011_rpc_jadwal_kelompok_modul.sql). Dipakai toggle "Per Kelompok" di
-   Katalog Jadwal (Task B, RENCANA_PERUBAHAN_v5.md). — */
+   Katalog Jadwal. */
 async function apiGetJadwalKelompokModul() {
   const { data, error } = await SB.rpc('jadwal_kelompok_modul');
   if (error) throw new Error(error.message);
@@ -385,10 +385,10 @@ async function apiGetJadwalKelompokModul() {
   }))};
 }
 
-/* — getAdminJadwal: SEMUA jadwal lintas kelompok/modul/tanggal (admin only,
+/* getAdminJadwal: SEMUA jadwal lintas kelompok/modul/tanggal (admin only,
    RLS sched_admin_all mengizinkan baca semua baris). Output menyertakan
    module_id + kode + judul + aslab pemegang slot (set_by + name) untuk
-   halaman Jadwal admin (Fitur 1, RENCANA_PERUBAHAN_v8.md). — */
+   halaman Jadwal admin. */
 async function apiGetAdminJadwal() {
   const { data: sched, error } = await SB.from('schedules')
     .select('module_id, kelompok, tanggal, sesi, set_by, updated_at, modules:module_id(judul,kode)')
@@ -415,9 +415,9 @@ async function apiGetAdminJadwal() {
   }))};
 }
 
-/* — adminHapusJadwal: body {moduleId, kelompok}. Hapus jadwal + nilai terkait
+/* adminHapusJadwal: body {moduleId, kelompok}. Hapus jadwal + nilai terkait
    atomik via RPC SECURITY DEFINER admin_hapus_jadwal (lihat
-   0012_admin_full_power_nilai_jadwal.sql). Dipakai halaman Jadwal admin. — */
+   0012_admin_full_power_nilai_jadwal.sql). Dipakai halaman Jadwal admin. */
 async function apiAdminHapusJadwal(body) {
   const { error } = await SB.rpc('admin_hapus_jadwal', {
     p_module_id: body.moduleId,
@@ -427,8 +427,8 @@ async function apiAdminHapusJadwal(body) {
   return { success: true };
 }
 
-/* — setGrade: body {username, judul, setBy, 10 komponen, 10 catatan, nilaiAkhir(ignored)}.
-   nilai_akhir dihitung ulang oleh trigger recompute_nilai_akhir di server. — */
+/* setGrade: body {username, judul, setBy, 10 komponen, 10 catatan, nilaiAkhir(ignored)}.
+   nilai_akhir dihitung ulang oleh trigger recompute_nilai_akhir di server. */
 async function apiSetGrade(body) {
   const moduleId = await getModuleIdByJudul(body.judul);
   const rec = {
@@ -448,7 +448,7 @@ async function apiSetGrade(body) {
     ['catFormat','cat_format'], ['catPlagiasi','cat_plagiasi'], ['catKeterlambatan','cat_keterlambatan'],
   ];
   // Komponen nilai: kunci yang ada di body -> null bila kosong/NaN, selain itu parseFloat.
-  // Khusus keterlambatan (NOT NULL DEFAULT 0 di DB, 0014) -> kirim 0 bila kosong (Tugas 4.2).
+  // Khusus keterlambatan (NOT NULL DEFAULT 0 di DB, 0014) -> kirim 0 bila kosong.
   for (const k of KOMP) {
     if (body[k] === undefined) continue; // kunci tidak ada di body -> jangan sentuh (pertahankan nilai lama)
     const v = body[k];
@@ -484,7 +484,7 @@ async function apiSetGrade(body) {
   return { success: true };
 }
 
-/* — deleteGrade: body {username, judul}. Hapus baris nilai (untuk koreksi salah input). — */
+/* deleteGrade: body {username, judul}. Hapus baris nilai (untuk koreksi salah input). */
 async function apiDeleteGrade(body) {
   const moduleId = await getModuleIdByJudul(body.judul);
   const { error } = await SB.from('grades')

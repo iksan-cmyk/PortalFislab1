@@ -13,8 +13,8 @@ function loadProfilA(ses){
       </div>
     </div>`);
 }
-/* — Modul Praktikum (aslab): daftar modul sama seperti halaman praktikan, read-only,
-   klik kartu buka viewer. Dipakai aslab untuk lihat file modul yang dipegang/sedang dinilai. — */
+/* Modul Praktikum (aslab): daftar modul sama seperti halaman praktikan, read-only,
+   klik kartu buka viewer. Dipakai aslab untuk lihat file modul yang dipegang/sedang dinilai. */
 async function loadModulA(){
   setContent(loading('Memuat modul…'));
   try{
@@ -56,16 +56,16 @@ async function loadNilaiA(ses){
     <div id="a-grade-wrap"></div>
     <div id="a-riwayat-wrap"></div>`);
 
-    // Rekap Nilai E1-E10 (menggantikan riwayat lama — RENCANA_PERUBAHAN_v5.md Task A, Opsi a).
+    // Rekap Nilai E1-E10 (pengganti riwayat lama).
     await renderRekapNilai(mods, users, rotasi, ses);
   }catch(e){setContent(`<p style="color:red">${esc(e.message)}</p>`);}
 }
 
-/* — renderRekapNilai: tabel rekap nilai_akhir SEMUA praktikan x SEMUA modul E1-E10.
+/* renderRekapNilai: tabel rekap nilai_akhir SEMUA praktikan x SEMUA modul E1-E10.
    Baris = praktikan (urut NRP naik), kolom = modul urut sesuai modules.urutan.
    Filter: dropdown Kelompok + input Nama + input NRP (AND, client-side).
    Tombol Hapus per sel HANYA muncul kalau aslab yang login memegang
-   (module_id + kelompok praktikan) menurut rotasi (Opsi ii — cek ketat). — */
+   (module_id + kelompok praktikan) menurut rotasi. */
 async function renderRekapNilai(mods, users, rotasi, ses){
   const wrap = document.getElementById('a-riwayat-wrap');
   if (!wrap) return;
@@ -154,8 +154,8 @@ function applyRekapFilters(){
   w.innerHTML = rekapTableHtml();
 }
 
-/* — refreshRekapNilai: re-fetch data rekap & re-render tabel (dipakai setelah
-   submit/batal nilai). Filter state (kelompok/nama/nrp) dipertahankan. — */
+/* refreshRekapNilai: re-fetch data rekap & re-render tabel (dipakai setelah
+   submit/batal nilai). Filter state (kelompok/nama/nrp) dipertahankan. */
 async function refreshRekapNilai(){
   const st = window._rekapState; if (!st) return;
   try {
@@ -201,13 +201,13 @@ function aGrpChange(sel){
     list.map(u=>`<option value="${esc(u.username)}">${esc(u.name)}</option>`).join('');
 }
 
-/* — setupInputNilaiKeys: pasang navigasi Enter + cegah scroll-wheel ubah nilai
+/* setupInputNilaiKeys: pasang navigasi Enter + cegah scroll-wheel ubah nilai
    pada input angka di form Input Nilai (aslab & modal admin). Dipanggil sekali
    saat form dirender (form lama di-replace via innerHTML -> listener lama ikut
    hilang, tidak terpasang ganda). Enter di baris non-terakhir -> fokus ke input
    berikutnya + select() isi. Enter di baris terakhir -> submit via jalur yang
    sama dengan tombol Simpan (form.requestSubmit / dispatch submit). Hanya
-   tangani input[type=number] di .nform-grid — bukan textarea catatan. — */
+   tangani input[type=number] di .nform-grid — bukan textarea catatan. */
 function setupInputNilaiKeys(form, saveBtnId){
   if(!form) return;
   form.addEventListener('keydown', e=>{

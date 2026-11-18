@@ -1,5 +1,4 @@
--- 0012_admin_full_power_nilai_jadwal.sql
--- Fitur 1 (RENCANA_PERUBAHAN_v8.md): admin full-power atas nilai & jadwal.
+-- Admin full-power atas nilai & jadwal.
 --
 -- Dua perubahan di sini:
 -- 1. RLS grades: admin sebelumnya hanya SELECT (grades_admin_select, 0001).
@@ -20,9 +19,7 @@
 -- Trigger cek_batas_aslab_jadwal (0009) TETAP berlaku saat admin edit jadwal
 -- (via upsert schedules) -- tidak di-bypass di sini.
 
--- =============================================================================
 -- 1. RLS grades: admin full power
--- =============================================================================
 DROP POLICY IF EXISTS grades_admin_select ON public.grades;
 
 CREATE POLICY grades_admin_all ON public.grades
@@ -33,9 +30,7 @@ CREATE POLICY grades_admin_all ON public.grades
 -- GRANT SELECT,INSERT,UPDATE,DELETE ON grades TO authenticated sudah ada di 0001,
 -- tidak perlu grant tambahan.
 
--- =============================================================================
 -- 2. RPC admin_hapus_jadwal (atomic delete jadwal + nilai terkait)
--- =============================================================================
 CREATE OR REPLACE FUNCTION public.admin_hapus_jadwal(p_module_id text, p_kelompok int)
 RETURNS void
 LANGUAGE plpgsql SECURITY DEFINER AS $$
