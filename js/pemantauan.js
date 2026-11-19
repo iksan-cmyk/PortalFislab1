@@ -8,6 +8,9 @@ window._pmtu = null;   // { data, ringkas }
 window._pmtuF = { aslab:'', modul:'', status:'belum-lengkap' };
 window._pmtuSes = null;
 
+// Batas nilai akhir untuk dianggap "sudah dinilai" (satu tempat, dipakai di teks).
+const PMTU_BATAS_NILAI = 40;
+
 function pmtuStatus(u){
   if (u.sudah_dinilai >= u.total_praktikan) return 'sudah';
   if (u.sudah_dinilai > 0) return 'sebagian';
@@ -72,6 +75,7 @@ function renderPemantauan(){
     <span class="ey">Pemantauan</span>
     <h1>Pemantauan Penilaian</h1>
     <p>Aslab yang belum (selesai) menilai kelompok yang diajarnya.</p>
+    <p>Praktikan dengan nilai akhir di bawah ${PMTU_BATAS_NILAI} dihitung belum dinilai.</p>
   </div>
   <div class="pmtu-summary">
     <div class="card pmtu-sum"><span class="pmtu-sum-n">${nBelum}</span><span class="pmtu-sum-l">Belum dinilai</span></div>
